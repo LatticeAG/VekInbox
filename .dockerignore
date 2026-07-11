@@ -1,0 +1,25 @@
+# Dependencies
+node_modules
+**/node_modules
+.pnpm-store
+
+# Build artifacts (rebuilt in image)
+dist
+**/dist
+.turbo
+
+# Dev / local
+.git
+.env
+.env.*
+!.env.example
+*.md
+!README.md
+
+# Tests & tooling
+coverage
+**/*.test.ts
+**/*.spec.ts
+
+# Web dev
+apps/web/node_modules
