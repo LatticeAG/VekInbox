@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { eq } from "drizzle-orm";
 import { generateId } from "@latticeag/vekinbox-shared";
 import { requests, workspaces } from "@latticeag/vekinbox-db";
-import { processExpiredRequests } from "../src/services/request.service.js";
+import { processExpiredRequests } from "../dist/services/request.service.js";
 import {
   apiFetch,
   createTestFixtures,
