@@ -8,4 +8,5 @@ console.log(`VekInbox API listening on http://localhost:${port}`);
 serve({
   fetch: app.fetch,
   port,
+  hostname: "0.0.0.0",
 });
