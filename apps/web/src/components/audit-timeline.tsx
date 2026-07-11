@@ -14,6 +14,8 @@ const eventLabels: Record<string, string> = {
   "request.cancelled": "Request cancelled",
   "request.timed_out": "Timed out",
   "request.escalated": "Escalated",
+  "request.webhook_delivered": "Webhook delivered",
+  "request.webhook_failed": "Webhook delivery failed",
   "webhook.delivered": "Webhook delivered",
   "webhook.failed": "Webhook delivery failed",
   "notification.sent": "Notification sent",

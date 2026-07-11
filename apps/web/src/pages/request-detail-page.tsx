@@ -2,10 +2,14 @@ import { ArrowLeft, Bot, Check, MessageSquare, X } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import { Link, useParams } from "react-router-dom";
+import { toast } from "sonner";
+import { AssigneesDisplay } from "@/components/assignees-display";
 import { AuditTimeline } from "@/components/audit-timeline";
 import { ConfirmActionDialog } from "@/components/confirm-action-dialog";
 import { PriorityBadge } from "@/components/priority-badge";
+import { RequestDetailSkeleton } from "@/components/request-detail-skeleton";
 import { StatusBadge } from "@/components/status-badge";
+import { WebhookDeliveriesPanel } from "@/components/webhook-deliveries-panel";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -18,6 +22,12 @@ import { api, ApiClientError, type RequestDetail } from "@/lib/api";
 import { formatDateTime, formatTimeout, isPending } from "@/lib/format";
 
 type ActionName = "approve" | "decline" | "request_changes";
+
+const actionLabels: Record<ActionName, string> = {
+  approve: "Approved",
+  decline: "Declined",
+  request_changes: "Changes requested",
+};
 
 export function RequestDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -46,7 +56,7 @@ export function RequestDetailPage() {
   }, [id]);
 
   useEffect(() => {
-    fetchRequest();
+    void fetchRequest();
   }, [fetchRequest]);
 
   const handleAction = async (action: ActionName) => {
@@ -67,24 +77,22 @@ export function RequestDetailPage() {
     try {
       await api.requests.action(request.id, action);
       setConfirmAction(null);
+      toast.success(`Request ${actionLabels[action].toLowerCase()}`);
       await fetchRequest();
     } catch (err) {
-      setError(
+      const message =
         err instanceof ApiClientError
           ? err.message
-          : "Failed to perform action",
-      );
+          : "Failed to perform action";
+      setError(message);
+      toast.error(message);
     } finally {
       setActionLoading(false);
     }
   };
 
   if (loading) {
-    return (
-      <div className="flex items-center justify-center py-24">
-        <div className="h-8 w-8 animate-spin rounded-full border-2 border-muted border-t-primary" />
-      </div>
-    );
+    return <RequestDetailSkeleton />;
   }
 
   if (error && !request) {
@@ -109,8 +117,8 @@ export function RequestDetailPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-start justify-between gap-4">
-        <div className="space-y-3">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+        <div className="space-y-3 min-w-0">
           <Button variant="ghost" size="sm" asChild>
             <Link to="/inbox">
               <ArrowLeft className="mr-1.5 h-4 w-4" />
@@ -123,14 +131,14 @@ export function RequestDetailPage() {
             <StatusBadge status={request.status} />
           </div>
 
-          <h1 className="text-2xl font-semibold tracking-tight">
+          <h1 className="text-2xl font-semibold tracking-tight break-words">
             {request.title}
           </h1>
 
           <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-muted-foreground">
             <span className="flex items-center gap-1.5">
-              <Bot className="h-4 w-4" />
-              <span className="font-mono text-xs">{request.agent_id}</span>
+              <Bot className="h-4 w-4 shrink-0" />
+              <span className="font-mono text-xs break-all">{request.agent_id}</span>
             </span>
             <span>Created {formatDateTime(request.created_at)}</span>
             {request.timeout_at && (
@@ -138,7 +146,7 @@ export function RequestDetailPage() {
             )}
           </div>
 
-          <p className="font-mono text-xs text-muted-foreground">
+          <p className="font-mono text-xs text-muted-foreground break-all">
             {request.id} · {request.key}
           </p>
         </div>
@@ -152,7 +160,8 @@ export function RequestDetailPage() {
               onClick={() => handleAction("request_changes")}
             >
               <MessageSquare className="mr-1.5 h-4 w-4" />
-              Request changes
+              <span className="hidden sm:inline">Request changes</span>
+              <span className="sm:hidden">Changes</span>
             </Button>
             <Button
               variant="destructive"
@@ -211,6 +220,11 @@ export function RequestDetailPage() {
               </CardContent>
             </Card>
           )}
+
+          <WebhookDeliveriesPanel
+            requestId={request.id}
+            events={request.events}
+          />
         </div>
 
         <div className="space-y-6">
@@ -219,11 +233,11 @@ export function RequestDetailPage() {
               <CardTitle className="text-base">Details</CardTitle>
             </CardHeader>
             <CardContent className="space-y-3 text-sm">
-              <div className="flex justify-between">
+              <div className="flex justify-between gap-4">
                 <span className="text-muted-foreground">Status</span>
                 <StatusBadge status={request.status} />
               </div>
-              <div className="flex justify-between">
+              <div className="flex justify-between gap-4">
                 <span className="text-muted-foreground">Priority</span>
                 <PriorityBadge priority={request.priority} />
               </div>
@@ -234,19 +248,21 @@ export function RequestDetailPage() {
                 </span>
               </div>
               {request.resolved_at && (
-                <div className="flex justify-between">
+                <div className="flex justify-between gap-4">
                   <span className="text-muted-foreground">Resolved</span>
                   <span>{formatDateTime(request.resolved_at)}</span>
                 </div>
               )}
               {request.resolved_by && (
-                <div className="flex justify-between">
+                <div className="flex justify-between gap-4">
                   <span className="text-muted-foreground">Resolved by</span>
                   <span className="font-mono text-xs">{request.resolved_by}</span>
                 </div>
               )}
             </CardContent>
           </Card>
+
+          <AssigneesDisplay assignees={request.assignees} />
 
           <AuditTimeline events={request.events} />
         </div>
