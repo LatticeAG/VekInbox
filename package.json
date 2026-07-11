@@ -1,0 +1,28 @@
+{
+  "name": "vekinbox",
+  "private": true,
+  "scripts": {
+    "build": "turbo build",
+    "dev": "turbo dev",
+    "worker:dev": "pnpm --filter @latticeag/vekinbox-worker dev",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "db:generate": "pnpm --filter @latticeag/vekinbox-db generate",
+    "db:migrate": "pnpm --filter @latticeag/vekinbox-db migrate",
+    "db:seed": "pnpm --filter @latticeag/vekinbox-db seed"
+  },
+  "devDependencies": {
+    "turbo": "^2.5.4",
+    "typescript": "^5.8.3",
+    "vitest": "^3.2.4"
+  },
+  "packageManager": "pnpm@10.12.4",
+  "engines": {
+    "node": ">=22"
+  },
+  "pnpm": {
+    "overrides": {
+      "ioredis": "5.10.1"
+    }
+  }
+}
