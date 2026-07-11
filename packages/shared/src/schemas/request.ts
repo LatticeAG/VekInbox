@@ -73,6 +73,7 @@ export const requestResponseSchema = z.object({
   resolved_by: z.string().nullable(),
   resolved_at: z.string().nullable(),
   resolution_payload: z.record(z.unknown()).nullable(),
+  assignees: z.array(z.string()).optional().default([]),
   created_at: z.string(),
   updated_at: z.string(),
 });

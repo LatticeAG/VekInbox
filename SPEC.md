@@ -979,38 +979,49 @@ pnpm --filter @latticeag/vekinbox-web dev
 | API: request CRUD + resolve + cancel | ✅ | |
 | API: workspaces, agents, keys | ✅ | |
 | API: dev-login session auth | ✅ | |
-| API: policies + channels CRUD | ✅ | No scheduler |
+| API: policies + channels CRUD | ✅ | |
 | API: inline webhook delivery | ✅ | 3 retries |
 | Web: login, inbox, detail, settings | ✅ | |
 | Web: dark mode, shadcn, IBM Plex | ✅ | |
-| SDK: create, get, list, cancel, wait, verify | ✅ | |
-| CLI: auth, request, dev tunnel | ✅ | Resolve needs session |
-| Docker Compose + Dockerfile | ✅ | API only |
+| SDK: create, get, list, cancel, wait, verify | ✅ | TypeScript |
+| CLI: auth, request, dev tunnel | ✅ | |
+| Docker Compose + Dockerfile | ✅ | API + worker |
 | README + LICENSE | ✅ | |
 
-### Next (v0.2.0)
+### Shipped in v0.2 / v0.3 (this branch)
+
+| Component | Status | Notes |
+|---|---|---|
+| `apps/worker` BullMQ processors | ✅ | Timeout, escalation, email, Slack, webhooks |
+| CLI session auth for resolve | ✅ | dev-login + `~/.vekinbox/cookies.json` |
+| CLI workspace/agent/policy/channel | ✅ | Full ops surface |
+| CLI dev webhook receiver | ✅ | Signature verify + formatted output |
+| Integration tests (Vitest) | ✅ | Postgres in CI |
+| Python SDK | ✅ | `packages/sdk-python` |
+| Framework examples | ✅ | LangGraph, OpenAI Agents, CrewAI |
+| OpenAPI 3.1 spec | ✅ | `packages/shared/openapi.yaml` |
+| CI workflow | ✅ | `.github/workflows/ci.yml` |
+| Timeout processor | ✅ | API + worker |
+
+### Next
 
 | Component | Priority | Effort |
 |---|---|---|
-| `apps/worker` BullMQ processors | P0 | Medium |
 | Email notifications (SMTP) | P0 | Medium |
 | Slack interactive messages | P1 | Medium |
-| Escalation + timeout scheduler | P0 | Medium |
+| Escalation scheduler (live) | P0 | Medium |
 | Webhook queue w/ long retry | P0 | Low |
 | SSRF protection | P0 | Low |
-| Integration tests | P0 | Medium |
 | Rate limiting | P1 | Low |
-| CLI session auth for resolve | P1 | Low |
 | API serves web static in Docker | P2 | Low |
-| `request.viewed` event | P2 | Trivial |
+| OIDC login for self-host | P2 | Medium |
+| Webhook delivery dashboard | P2 | Medium |
+| Docs site from OpenAPI | P2 | Low |
 
-### Later (v0.3.0)
+### Later
 
-- OIDC login for self-host
-- Python SDK
-- LangGraph / OpenAI Agents / CrewAI examples
-- Webhook delivery dashboard in web UI
-- OpenAPI spec generation + docs site
+- Hosted SaaS control plane
+- Browser OAuth flow for CLI (`vekinbox auth browser-login`)
 
 ---
 

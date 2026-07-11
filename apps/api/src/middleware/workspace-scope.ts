@@ -17,3 +17,11 @@ export async function assertWorkspaceMembership(userId: string, workspaceId: str
 
   return membership;
 }
+
+export async function assertAdminMembership(userId: string, workspaceId: string) {
+  const membership = await assertWorkspaceMembership(userId, workspaceId);
+  if (membership.role !== "admin" && membership.role !== "owner") {
+    throw new VekInboxError("forbidden", "Admin access required", 403);
+  }
+  return membership;
+}

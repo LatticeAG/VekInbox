@@ -32,7 +32,7 @@ Save that key — it is shown only once.
 | Postgres      | localhost:5432             |
 | Redis         | localhost:6379             |
 
-## SDK example
+## SDK example (TypeScript)
 
 ```bash
 npm install @latticeag/vekinbox
@@ -51,52 +51,105 @@ const request = await inbox.requests.create({
   agentId: "agent_...",
   key: "invoice.pay.001",
   title: "Approve $450 invoice payment?",
-  description: "Vendor: Acme Corp. Invoice #1024.",
-  priority: "high",
   resumeWebhook: "https://my-agent.example.com/resume",
-  metadata: { invoice_id: 1024 },
 });
 
-const result = await inbox.requests.waitForResolution(request.id, {
-  timeout: "1h",
-});
-
+const result = await inbox.requests.waitForResolution(request.id, { timeout: "1h" });
 if (result.status === "approved") {
-  console.log("Approved — proceeding with action");
+  console.log("Approved — proceeding");
 }
-
-// Verify incoming resume webhooks
-const valid = inbox.webhooks.verify(headers, rawBody, webhookSecret);
 ```
 
-## CLI examples
+## Python SDK
+
+```bash
+cd packages/sdk-python
+pip install -e .
+```
+
+```python
+from vekinbox import VekInbox
+from vekinbox.types import CreateRequestInput
+
+inbox = VekInbox(api_key="vk_live_...", base_url="http://localhost:3001/v1")
+req = inbox.requests.create(CreateRequestInput(
+    workspace_id="ws_...",
+    key="deploy.prod.001",
+    title="Deploy to production?",
+))
+result = inbox.requests.wait_for_resolution(req.id, timeout="1h")
+```
+
+See [packages/sdk-python/README.md](packages/sdk-python/README.md).
+
+## CLI
 
 ```bash
 npm install -g @latticeag/vekinbox-cli
 
-# Configure credentials (~/.vekinbox/config.json)
-vekinbox auth login \
-  --email admin@localhost \
-  --api-key vk_live_... \
-  --base-url http://localhost:3001/v1 \
-  --workspace ws_...
-
+# Session + optional API key (stored in ~/.vekinbox/)
+vekinbox auth login --email admin@localhost --api-key vk_live_... --workspace ws_...
 vekinbox auth status
 
-vekinbox request create \
-  --title "Deploy to production?" \
-  --key "deploy.prod.001" \
-  --workspace ws_... \
-  --agent agent_...
+# Workspaces & agents (session auth)
+vekinbox workspace create --name "My Workspace"
+vekinbox workspace list
+vekinbox agent create --name "Payments Agent"
+vekinbox agent key create agent_...
 
+# Policies & channels
+vekinbox policy list
+vekinbox policy create --name "Default" --steps '[{"delay_ms":3600000,"notify":{}}]'
+vekinbox channel list
+vekinbox channel add --name "Ops Email" --type email
+
+# Requests (API key to create/cancel; session to resolve)
+vekinbox request create --title "Deploy?" --key "deploy.001" --agent agent_...
 vekinbox request list --status pending
 vekinbox request show req_...
 vekinbox request resolve req_... --action approve --note "LGTM"
 vekinbox request cancel req_...
 
-# Local webhook receiver (forwards to your agent resume URL)
-vekinbox dev --forward-to http://localhost:3000/resume --secret whsec_...
+# Local webhook receiver with signature verification
+vekinbox dev --forward-to http://localhost:3000/resume --port 4040 --secret whsec_...
 ```
+
+## Framework examples
+
+| Example | Path | Description |
+|---------|------|-------------|
+| LangGraph (Python) | [examples/langgraph-python/](examples/langgraph-python/) | Approval gate before risky tool |
+| OpenAI Agents (TS) | [examples/openai-agents-ts/](examples/openai-agents-ts/) | Tool with `waitForResolution` |
+| CrewAI (Python) | [examples/crewai-python/](examples/crewai-python/) | Deploy tool with approval |
+
+## Worker
+
+Background jobs (timeouts, escalations, email/Slack notifications, webhook retries) run in `apps/worker`:
+
+```bash
+# Requires Redis + Postgres (docker compose up postgres redis -d)
+pnpm worker:dev
+```
+
+The worker shares the same `DATABASE_URL` and `REDIS_URL` as the API.
+
+## Testing
+
+Integration tests use Vitest against a real Postgres database:
+
+```bash
+docker compose up postgres redis -d
+export DATABASE_URL=postgresql://vekinbox:vekinbox@localhost:5432/vekinbox
+pnpm db:migrate
+pnpm test          # run once
+pnpm test:watch    # watch mode
+```
+
+Tests cover idempotent request creation, agent vs session auth, tenant isolation, cancel, timeout processing, and webhook signature verification.
+
+## API documentation
+
+OpenAPI 3.1 spec: [packages/shared/openapi.yaml](packages/shared/openapi.yaml)
 
 ## Self-host configuration
 
@@ -107,16 +160,8 @@ vekinbox dev --forward-to http://localhost:3000/resume --secret whsec_...
 | `SESSION_SECRET` | Cookie/session signing secret | — |
 | `PORT` / `API_PORT` | HTTP listen port | `3001` |
 | `WEB_URL` | Web UI origin (CORS) | `http://localhost:3001` |
-| `VITE_API_URL` | Web app API base (build-time) | `http://localhost:3001/v1` |
 | `EMPTY_DB` | Seed demo data on startup | `false` |
-| `SMTP_HOST` | SMTP server | `localhost` |
-| `SMTP_PORT` | SMTP port | `1025` |
-| `SMTP_FROM` | From address | `noreply@vekinbox.local` |
-| `SLACK_BOT_TOKEN` | Slack bot token (optional) | — |
-| `SLACK_SIGNING_SECRET` | Slack signing secret | — |
-| `GITHUB_CLIENT_ID` | OAuth (optional) | — |
-| `GITHUB_CLIENT_SECRET` | OAuth (optional) | — |
-| `SENTRY_DSN` | Error monitoring (optional) | — |
+| `SMTP_HOST` / `SMTP_PORT` | Email notifications | `localhost:1025` |
 
 ## Architecture
 
@@ -126,64 +171,59 @@ vekinbox dev --forward-to http://localhost:3000/resume --secret whsec_...
 │ / CLI       │                │  API :3001   │              └──────────┘
 └─────────────┘                │              │     queue    ┌──────────┐
                                │              │─────────────▶│  Redis   │
-┌─────────────┐     HTTPS      │              │              └──────────┘
-│  Reviewer   │───────────────▶│  (web static │──┐ notify
-│  Browser    │                │   + workers) │  ├─▶ Email / Slack
-└─────────────┘                └──────┬───────┘  │
-                                      │          └─▶ Signed resume webhook
-                                      ▼
-                               ┌──────────────┐
-                               │ Agent resume │
-                               │   endpoint   │
-                               └──────────────┘
+┌─────────────┐     HTTPS      │              │              └────┬─────┘
+│  Reviewer   │───────────────▶│  Web inbox   │                   │
+│  Browser    │                └──────────────┘                   ▼
+└─────────────┘                                            ┌──────────────┐
+                                                           │ apps/worker  │
+                                                           └──────────────┘
 ```
 
 **Monorepo layout**
 
 ```
 apps/
-  api/          Hono API (Node 22)
-  web/          React + Vite reviewer inbox
+  api/              Hono API (Node 22)
+  web/              React + Vite reviewer inbox
+  worker/           BullMQ background processors
 packages/
-  sdk/          @latticeag/vekinbox
-  cli/          @latticeag/vekinbox-cli
-  shared/       Types, Zod schemas, webhook verify
-  db/           Drizzle schema + migrations
+  sdk/              @latticeag/vekinbox (TypeScript)
+  sdk-python/       vekinbox (Python)
+  cli/              @latticeag/vekinbox-cli
+  shared/           Types, Zod schemas, OpenAPI, webhook crypto
+  db/               Drizzle schema + migrations
+examples/
+  langgraph-python/
+  openai-agents-ts/
+  crewai-python/
 ```
 
 ## Development
 
-**Requirements:** Node 22+, pnpm 9+, Docker (for Postgres/Redis).
+**Requirements:** Node 22+, pnpm 10+, Docker (Postgres/Redis), Python 3.10+ (for Python SDK).
 
 ```bash
 pnpm install
-
-# Start dependencies
 docker compose up postgres redis mailcatcher -d
-
 cp .env.example .env
 export DATABASE_URL=postgresql://vekinbox:vekinbox@localhost:5432/vekinbox
-
 pnpm db:migrate
-pnpm db:seed          # prints demo API key
-
-pnpm dev              # turbo dev (api + web + packages)
-```
-
-Build all packages:
-
-```bash
+pnpm db:seed
+pnpm dev              # API + web + packages
+pnpm worker:dev       # background worker (separate terminal)
 pnpm build
+pnpm test
 ```
 
 ## Packages
 
-| Package | npm name | Description |
-|---------|----------|-------------|
-| `packages/sdk` | `@latticeag/vekinbox` | TypeScript SDK — create, list, wait, webhook verify |
-| `packages/cli` | `@latticeag/vekinbox-cli` | `vekinbox` CLI for auth, requests, local dev tunnel |
-| `packages/shared` | `@latticeag/vekinbox-shared` | Shared types and validation (internal) |
-| `packages/db` | `@latticeag/vekinbox-db` | Drizzle ORM schema and migrations (internal) |
+| Package | Name | Description |
+|---------|------|-------------|
+| `packages/sdk` | `@latticeag/vekinbox` | TypeScript SDK |
+| `packages/sdk-python` | `vekinbox` | Python SDK |
+| `packages/cli` | `@latticeag/vekinbox-cli` | `vekinbox` CLI |
+| `packages/shared` | `@latticeag/vekinbox-shared` | Shared types + OpenAPI |
+| `packages/db` | `@latticeag/vekinbox-db` | Drizzle ORM schema |
 
 ## License
 

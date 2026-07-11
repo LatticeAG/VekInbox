@@ -33,6 +33,7 @@ export async function verifyApiKey(rawKey: string): Promise<ApiKeyAuth | null> {
         workspaceId: row.agent.workspaceId,
         apiKeyId: row.apiKey.id,
         environment: keyEnvironment(rawKey),
+        rateLimitPerMinute: row.agent.rateLimitPerMinute,
       };
     }
   }

@@ -1,5 +1,6 @@
 import { defineCommand } from "citty";
 import { createClient, getWorkspaceId } from "../client.js";
+import { apiRequest } from "../http.js";
 
 export const requestCreate = defineCommand({
   meta: {
@@ -109,28 +110,16 @@ export const requestResolve = defineCommand({
     note: { type: "string", description: "Reviewer note" },
   },
   async run({ args }) {
-    const config = await import("../config.js").then((m) => m.requireConfig());
-    const baseUrl = config.baseUrl.replace(/\/$/, "");
-    const response = await fetch(
-      `${baseUrl}/requests/${encodeURIComponent(args.id)}/actions/${encodeURIComponent(args.action)}`,
+    const request = await apiRequest<Record<string, unknown>>(
+      `/requests/${encodeURIComponent(args.id)}/actions/${encodeURIComponent(args.action)}`,
       {
         method: "POST",
-        headers: {
-          Authorization: `Bearer ${config.apiKey}`,
-          "Content-Type": "application/json",
-          Accept: "application/json",
-        },
-        body: JSON.stringify({ note: args.note }),
+        auth: "session",
+        body: { note: args.note },
       },
     );
 
-    const text = await response.text();
-    if (!response.ok) {
-      console.error(`Error ${response.status}: ${text}`);
-      process.exit(1);
-    }
-
-    console.log(JSON.stringify(JSON.parse(text), null, 2));
+    console.log(JSON.stringify(request, null, 2));
   },
 });
 

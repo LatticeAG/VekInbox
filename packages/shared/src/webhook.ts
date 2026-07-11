@@ -1,9 +1,25 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import {
+  WEBHOOK_DELIVERY_ID_HEADER,
   WEBHOOK_MAX_TIMESTAMP_SKEW_MS,
   WEBHOOK_SIGNATURE_HEADER,
   WEBHOOK_TIMESTAMP_HEADER,
 } from "./types.js";
+
+export function hmacSha256(secret: string, payload: string): string {
+  return createHmac("sha256", secret).update(payload).digest("hex");
+}
+
+export function signWebhook(secret: string, timestamp: string, body: string): string {
+  const signature = hmacSha256(secret, `${timestamp}.${body}`);
+  return `sha256=${signature}`;
+}
+
+export const webhookHeaders = {
+  signature: WEBHOOK_SIGNATURE_HEADER,
+  timestamp: WEBHOOK_TIMESTAMP_HEADER,
+  deliveryId: WEBHOOK_DELIVERY_ID_HEADER,
+} as const;
 
 export type WebhookHeaders = Record<string, string | string[] | undefined>;
 

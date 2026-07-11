@@ -20,6 +20,7 @@ import {
   getRequestEvents,
   listRequests,
   listRequestsForApiKey,
+  recordRequestViewed,
   resolveRequest,
 } from "../services/request.service.js";
 
@@ -60,6 +61,7 @@ requestRoutes.get("/:id", requireReviewerOrApiKey, async (c) => {
     }
     await assertWorkspaceMembership(session.userId, row.workspaceId);
     const request = await getRequest(row.workspaceId, requestId);
+    void recordRequestViewed(row.workspaceId, requestId, session.userId);
     return c.json(request);
   }
 

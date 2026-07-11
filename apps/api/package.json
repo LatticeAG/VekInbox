@@ -12,9 +12,11 @@
   "dependencies": {
     "@hono/node-server": "^1.13.7",
     "@latticeag/vekinbox-db": "workspace:*",
+    "@latticeag/vekinbox-queue": "workspace:*",
     "@latticeag/vekinbox-shared": "workspace:*",
     "drizzle-orm": "^0.44.2",
     "hono": "^4.6.14",
+    "ioredis": "^5.6.1",
     "jose": "^5.9.6",
     "zod": "^3.24.1"
   },

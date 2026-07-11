@@ -20,10 +20,22 @@ export {
   type ResolveRequestInput,
   type ResumeWebhookPayload,
 } from "./types.js";
-export * from "./webhook.js";
+export {
+  hmacSha256,
+  signWebhook,
+  verifyWebhookSignature,
+  webhookHeaders,
+  type WebhookHeaders,
+} from "./webhook.js";
 export * from "./schemas/request.js";
 export * from "./schemas/workspace.js";
 export * from "./schemas/agent.js";
 export * from "./schemas/auth.js";
 export * from "./schemas/policy.js";
 export * from "./schemas/channel.js";
+export {
+  buildEmailActionUrl,
+  createEmailActionToken,
+  verifyEmailActionToken,
+  type EmailActionTokenPayload,
+} from "./email-token.js";

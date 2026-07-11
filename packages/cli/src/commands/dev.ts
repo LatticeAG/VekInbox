@@ -1,6 +1,21 @@
 import { createServer } from "node:http";
 import { defineCommand } from "citty";
-import { verifyWebhookSignature } from "@latticeag/vekinbox-shared";
+import {
+  verifyWebhookSignature,
+  WEBHOOK_DELIVERY_ID_HEADER,
+  WEBHOOK_SIGNATURE_HEADER,
+  WEBHOOK_TIMESTAMP_HEADER,
+} from "@latticeag/vekinbox-shared";
+
+function formatWebhookBox(lines: string[]): void {
+  const width = Math.max(...lines.map((l) => l.length), 40);
+  const border = "─".repeat(width + 2);
+  console.log(`┌${border}┐`);
+  for (const line of lines) {
+    console.log(`│ ${line.padEnd(width)} │`);
+  }
+  console.log(`└${border}┘`);
+}
 
 export const devCommand = defineCommand({
   meta: {
@@ -16,7 +31,7 @@ export const devCommand = defineCommand({
     port: {
       type: "string",
       description: "Local listen port",
-      default: "4242",
+      default: "4040",
     },
     secret: {
       type: "string",
@@ -47,25 +62,61 @@ export const devCommand = defineCommand({
         headers[key] = value;
       }
 
-      if (secret) {
+      const deliveryId = headers[WEBHOOK_DELIVERY_ID_HEADER] as string | undefined;
+      const timestamp = headers[WEBHOOK_TIMESTAMP_HEADER] as string | undefined;
+      const signaturePresent = Boolean(headers[WEBHOOK_SIGNATURE_HEADER]);
+
+      let signatureStatus: string;
+      if (!secret) {
+        signatureStatus = "skipped (no --secret)";
+      } else if (!signaturePresent) {
+        signatureStatus = "missing signature header";
+        formatWebhookBox([
+          "Webhook received",
+          `Time:      ${new Date().toISOString()}`,
+          `Delivery:  ${deliveryId ?? "(none)"}`,
+          `Signature: ${signatureStatus}`,
+        ]);
+        res.writeHead(401, { "Content-Type": "text/plain" });
+        res.end("Missing signature");
+        return;
+      } else {
         const valid = verifyWebhookSignature(headers, rawBody, secret);
+        signatureStatus = valid ? "verified" : "INVALID";
         if (!valid) {
-          console.error("[vekinbox dev] Invalid webhook signature");
+          formatWebhookBox([
+            "Webhook received",
+            `Time:      ${new Date().toISOString()}`,
+            `Delivery:  ${deliveryId ?? "(none)"}`,
+            `Timestamp: ${timestamp ?? "(none)"}`,
+            `Signature: ${signatureStatus}`,
+          ]);
           res.writeHead(401, { "Content-Type": "text/plain" });
           res.end("Invalid signature");
           return;
         }
-        console.log("[vekinbox dev] Signature verified");
       }
 
-      let payload: unknown;
+      let payload: Record<string, unknown> = {};
       try {
-        payload = JSON.parse(bodyText);
+        payload = JSON.parse(bodyText) as Record<string, unknown>;
       } catch {
-        payload = bodyText;
+        payload = { raw: bodyText };
       }
 
-      console.log("[vekinbox dev] Received webhook:", JSON.stringify(payload, null, 2));
+      const lines = [
+        "Webhook received",
+        `Time:      ${new Date().toISOString()}`,
+        `Delivery:  ${deliveryId ?? "(none)"}`,
+        `Timestamp: ${timestamp ?? "(none)"}`,
+        `Signature: ${signatureStatus}`,
+        `Request:   ${String(payload["request_id"] ?? "(unknown)")}`,
+        `Status:    ${String(payload["status"] ?? "(unknown)")}`,
+        `Action:    ${String(payload["action"] ?? "(unknown)")}`,
+        `Key:       ${String(payload["key"] ?? "(unknown)")}`,
+      ];
+      formatWebhookBox(lines);
+      console.log("Payload:", JSON.stringify(payload, null, 2));
 
       try {
         const forwardRes = await fetch(forwardTo, {
@@ -77,21 +128,24 @@ export const devCommand = defineCommand({
           body: bodyText,
         });
         const forwardText = await forwardRes.text();
-        console.log(
-          `[vekinbox dev] Forwarded to ${forwardTo} → ${forwardRes.status}`,
-        );
+        console.log(`→ Forwarded to ${forwardTo} (${forwardRes.status})`);
         res.writeHead(forwardRes.status, { "Content-Type": "application/json" });
         res.end(forwardText || "{}");
       } catch (err) {
-        console.error("[vekinbox dev] Forward failed:", err);
+        console.error("Forward failed:", err);
         res.writeHead(502, { "Content-Type": "text/plain" });
         res.end("Forward failed");
       }
     });
 
     server.listen(port, () => {
-      console.log(`VekInbox dev webhook receiver listening on http://localhost:${port}`);
-      console.log(`Forwarding verified payloads to ${forwardTo}`);
+      console.log(`VekInbox dev webhook receiver on http://localhost:${port}`);
+      console.log(`Forwarding to ${forwardTo}`);
+      if (secret) {
+        console.log("Signature verification: enabled");
+      } else {
+        console.log("Signature verification: disabled (pass --secret to enable)");
+      }
       console.log("Set resume_webhook_url to this server when testing locally.");
     });
   },

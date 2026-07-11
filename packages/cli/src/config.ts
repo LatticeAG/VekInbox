@@ -43,3 +43,8 @@ export async function requireConfig(): Promise<Required<Pick<VekInboxConfig, "ap
     baseUrl: config.baseUrl ?? "http://localhost:3001/v1",
   };
 }
+
+export async function requireBaseUrl(): Promise<string> {
+  const config = await loadConfig();
+  return (config.baseUrl ?? "http://localhost:3001/v1").replace(/\/$/, "");
+}

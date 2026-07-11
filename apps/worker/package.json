@@ -1,0 +1,28 @@
+{
+  "name": "@latticeag/vekinbox-worker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@latticeag/vekinbox-db": "workspace:*",
+    "@latticeag/vekinbox-queue": "workspace:*",
+    "@latticeag/vekinbox-shared": "workspace:*",
+    "@slack/web-api": "^7.9.3",
+    "bullmq": "^5.56.1",
+    "drizzle-orm": "^0.44.2",
+    "ioredis": "^5.6.1",
+    "nodemailer": "^7.0.4"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.32",
+    "@types/nodemailer": "^6.4.17",
+    "tsx": "^4.20.3",
+    "typescript": "^5.8.3"
+  }
+}

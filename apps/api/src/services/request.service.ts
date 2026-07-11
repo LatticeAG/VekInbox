@@ -1,5 +1,6 @@
 import {
   actionToStatus,
+  generateId,
   invalidAction,
   normalizeActions,
   notFound,
@@ -10,14 +11,15 @@ import {
   type RequestResponse,
   type ResolveRequestApiInput,
 } from "@latticeag/vekinbox-shared";
-import { and, desc, eq, lt, sql } from "drizzle-orm";
+import { createQueueConnection, scheduleRequestJobs } from "@latticeag/vekinbox-queue";
+import { and, desc, eq, inArray, isNotNull, lt, sql } from "drizzle-orm";
 import {
   requestAssignments,
   requests,
   workspaces,
 } from "@latticeag/vekinbox-db";
-import { generateId } from "@latticeag/vekinbox-shared";
 import { getDb } from "../lib/db.js";
+import { shouldRecordView } from "../lib/viewed-debounce.js";
 import { appendRequestEvent, listRequestEvents } from "./audit.service.js";
 import { queueWebhookDelivery } from "./webhook.service.js";
 import type { ApiKeyAuth } from "../middleware/auth.js";
@@ -26,7 +28,33 @@ function toIso(date: Date | null | undefined): string | null {
   return date ? date.toISOString() : null;
 }
 
-function mapRequest(row: typeof requests.$inferSelect): RequestResponse {
+async function loadAssigneesForRequests(
+  requestIds: string[],
+): Promise<Map<string, string[]>> {
+  const map = new Map<string, string[]>();
+  if (requestIds.length === 0) {
+    return map;
+  }
+
+  const db = getDb();
+  const rows = await db
+    .select()
+    .from(requestAssignments)
+    .where(inArray(requestAssignments.requestId, requestIds));
+
+  for (const row of rows) {
+    const existing = map.get(row.requestId) ?? [];
+    existing.push(row.userId);
+    map.set(row.requestId, existing);
+  }
+
+  return map;
+}
+
+function mapRequest(
+  row: typeof requests.$inferSelect,
+  assignees: string[] = [],
+): RequestResponse {
   const resolutionPayload =
     row.resolutionPayload ??
     (row.resolutionAction
@@ -52,6 +80,7 @@ function mapRequest(row: typeof requests.$inferSelect): RequestResponse {
     resume_webhook_url: row.resumeWebhookUrl,
     metadata: (row.metadata as Record<string, unknown>) ?? {},
     labels: row.labels ?? [],
+    assignees,
     resolved_by: row.resolvedBy,
     resolved_at: toIso(row.resolvedAt),
     resolution_payload: resolutionPayload as Record<string, unknown> | null,
@@ -85,7 +114,7 @@ export async function createRequest(
           updatedAt: new Date(),
         })
         .where(eq(requests.id, existing.id));
-      return mapRequest(existing);
+      return mapRequest(existing, (await loadAssigneesForRequests([existing.id])).get(existing.id) ?? []);
     }
     throw requestAlreadyResolved(existing.id, existing.status);
   }
@@ -146,7 +175,13 @@ export async function createRequest(
     payload: { key: input.key, title: input.title },
   });
 
-  return mapRequest(created!);
+  const redisUrl = process.env["REDIS_URL"];
+  if (redisUrl) {
+    const connection = createQueueConnection(redisUrl);
+    await scheduleRequestJobs(connection, getDb(), id);
+  }
+
+  return mapRequest(created!, input.assignees ?? []);
 }
 
 export async function listRequests(
@@ -177,7 +212,9 @@ export async function listRequests(
     .limit(query.limit + 1);
 
   const hasMore = rows.length > query.limit;
-  const data = (hasMore ? rows.slice(0, query.limit) : rows).map(mapRequest);
+  const page = hasMore ? rows.slice(0, query.limit) : rows;
+  const assigneeMap = await loadAssigneesForRequests(page.map((r) => r.id));
+  const data = page.map((row) => mapRequest(row, assigneeMap.get(row.id) ?? []));
   const next_cursor = hasMore ? data[data.length - 1]!.created_at : null;
 
   return { data, next_cursor };
@@ -195,7 +232,8 @@ export async function getRequest(workspaceId: string, requestId: string): Promis
     throw notFound("Request", requestId);
   }
 
-  return mapRequest(row);
+  const assigneeMap = await loadAssigneesForRequests([requestId]);
+  return mapRequest(row, assigneeMap.get(requestId) ?? []);
 }
 
 export async function resolveRequest(params: {
@@ -259,7 +297,8 @@ export async function resolveRequest(params: {
     payload: resolutionPayload,
   });
 
-  const result = mapRequest(updated!);
+  const assigneeMap = await loadAssigneesForRequests([params.requestId]);
+  const result = mapRequest(updated!, assigneeMap.get(params.requestId) ?? []);
 
   if (row.resumeWebhookUrl) {
     await queueWebhookDelivery({
@@ -332,7 +371,8 @@ export async function cancelRequest(
     payload: { reason },
   });
 
-  return mapRequest(updated!);
+  const assigneeMap = await loadAssigneesForRequests([requestId]);
+  return mapRequest(updated!, assigneeMap.get(requestId) ?? []);
 }
 
 export async function getRequestEvents(workspaceId: string, requestId: string) {
@@ -349,6 +389,91 @@ export async function getRequestEvents(workspaceId: string, requestId: string) {
   }));
 }
 
+export async function recordRequestViewed(
+  workspaceId: string,
+  requestId: string,
+  userId: string,
+): Promise<void> {
+  await getRequest(workspaceId, requestId);
+
+  const shouldRecord = await shouldRecordView(userId, requestId);
+  if (!shouldRecord) {
+    return;
+  }
+
+  await appendRequestEvent({
+    requestId,
+    type: "request.viewed",
+    actorType: "user",
+    actorId: userId,
+    payload: {},
+  });
+}
+
 export async function listRequestsForApiKey(auth: ApiKeyAuth, query: ListRequestsQuery) {
   return listRequests(auth.workspaceId, { ...query, agent_id: query.agent_id ?? auth.agentId });
+}
+
+/**
+ * Marks pending requests past their timeout as timed_out.
+ * Intended for the background worker; exposed for integration tests.
+ */
+export async function processExpiredRequests(): Promise<number> {
+  const db = getDb();
+  const now = new Date();
+
+  const expired = await db
+    .select()
+    .from(requests)
+    .where(
+      and(
+        eq(requests.status, "pending"),
+        isNotNull(requests.timeoutAt),
+        lt(requests.timeoutAt, now),
+      ),
+    );
+
+  for (const row of expired) {
+    const [updated] = await db
+      .update(requests)
+      .set({
+        status: "timed_out",
+        resolvedAt: now,
+        resolutionAction: "timeout",
+        resolutionNote: "Request timed out",
+        resolutionPayload: { action: "timeout" },
+        updatedAt: now,
+      })
+      .where(eq(requests.id, row.id))
+      .returning();
+
+    await appendRequestEvent({
+      requestId: row.id,
+      type: "request.timed_out",
+      actorType: "system",
+      actorId: null,
+      payload: { timeout_at: row.timeoutAt?.toISOString() },
+    });
+
+    if (updated && row.resumeWebhookUrl) {
+      const result = mapRequest(updated);
+      await queueWebhookDelivery({
+        requestId: row.id,
+        agentId: row.agentId,
+        url: row.resumeWebhookUrl,
+        payload: {
+          request_id: result.id,
+          workspace_id: result.workspace_id,
+          agent_id: result.agent_id,
+          key: result.key,
+          status: result.status,
+          action: "timeout",
+          resolved_at: result.resolved_at ?? now.toISOString(),
+          metadata: result.metadata,
+        },
+      });
+    }
+  }
+
+  return expired.length;
 }

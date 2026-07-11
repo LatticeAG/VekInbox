@@ -8,6 +8,7 @@ export type ApiKeyAuth = {
   workspaceId: string;
   apiKeyId: string;
   environment: "live" | "test";
+  rateLimitPerMinute: number;
 };
 
 declare module "hono" {

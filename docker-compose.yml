@@ -39,7 +39,7 @@ services:
       dockerfile: Dockerfile
     ports:
       - "3001:3001"
-    environment:
+    environment: &app_env
       DATABASE_URL: postgresql://vekinbox:vekinbox@postgres:5432/vekinbox
       REDIS_URL: redis://redis:6379
       SESSION_SECRET: ${SESSION_SECRET:-change-me-in-production}
@@ -53,6 +53,7 @@ services:
       POSTGRES_PORT: 5432
       POSTGRES_USER: vekinbox
       POSTGRES_DB: vekinbox
+      SLACK_BOT_TOKEN: ${SLACK_BOT_TOKEN:-}
     depends_on:
       postgres:
         condition: service_healthy
@@ -63,6 +64,22 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["/worker-entrypoint.sh"]
+    environment:
+      <<: *app_env
+      EMPTY_DB: "false"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      api:
+        condition: service_healthy
 
   # Web UI is served by the API container when built (apps/web/dist).
   # Uncomment for standalone Vite dev against the API:
