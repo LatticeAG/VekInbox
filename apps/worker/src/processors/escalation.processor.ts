@@ -1,6 +1,7 @@
 import { and, eq } from "drizzle-orm";
 import {
   escalationPolicies,
+  memberships,
   notificationChannels,
   requests,
   users,
@@ -45,7 +46,12 @@ export async function processEscalation(job: Job<EscalationJobData>) {
   const [policy] = await db
     .select()
     .from(escalationPolicies)
-    .where(eq(escalationPolicies.id, request.escalationPolicyId))
+    .where(
+      and(
+        eq(escalationPolicies.id, request.escalationPolicyId),
+        eq(escalationPolicies.workspaceId, request.workspaceId),
+      ),
+    )
     .limit(1);
 
   if (!policy) {
@@ -59,16 +65,34 @@ export async function processEscalation(job: Job<EscalationJobData>) {
   }
 
   if (request.status === "pending") {
-    await db
+    const [escalated] = await db
       .update(requests)
       .set({ status: "escalated", updatedAt: new Date() })
-      .where(eq(requests.id, requestId));
+      .where(and(eq(requests.id, requestId), eq(requests.status, "pending")))
+      .returning({ id: requests.id });
+    // Another processor or a human already changed the case. This job must be
+    // a no-op rather than emitting a duplicate escalation/audit event.
+    if (!escalated) {
+      return;
+    }
   }
 
   const connection = createQueueConnection(getRedisUrl());
 
   if (step.notify?.user_id) {
-    const [user] = await db.select().from(users).where(eq(users.id, step.notify.user_id)).limit(1);
+    const [membership] = await db
+      .select({ userId: memberships.userId })
+      .from(memberships)
+      .where(
+        and(
+          eq(memberships.workspaceId, request.workspaceId),
+          eq(memberships.userId, step.notify.user_id),
+        ),
+      )
+      .limit(1);
+    const [user] = membership
+      ? await db.select().from(users).where(eq(users.id, membership.userId)).limit(1)
+      : [];
     if (user) {
       const emailChannels = await db
         .select()
@@ -96,7 +120,12 @@ export async function processEscalation(job: Job<EscalationJobData>) {
     const [channel] = await db
       .select()
       .from(notificationChannels)
-      .where(eq(notificationChannels.id, step.notify.channel_id))
+      .where(
+        and(
+          eq(notificationChannels.id, step.notify.channel_id),
+          eq(notificationChannels.workspaceId, request.workspaceId),
+        ),
+      )
       .limit(1);
 
     if (channel?.enabled) {

@@ -4,8 +4,9 @@ import { createChannelSchema } from "@latticeag/vekinbox-shared";
 import { notificationChannels } from "@latticeag/vekinbox-db";
 import { generateId } from "@latticeag/vekinbox-shared";
 import { requireSession } from "../middleware/session.js";
-import { assertWorkspaceMembership } from "../middleware/workspace-scope.js";
+import { assertAdminMembership, assertWorkspaceMembership } from "../middleware/workspace-scope.js";
 import { getDb } from "../lib/db.js";
+import { redactChannelConfig } from "../lib/channel-config.js";
 
 export const channelRoutes = new Hono();
 
@@ -31,7 +32,7 @@ channelRoutes.get("/workspaces/:id/channels", async (c) => {
         workspace_id: ch.workspaceId,
         type: ch.type,
         name: (config["name"] as string) ?? ch.type,
-        config,
+        config: redactChannelConfig(config),
         enabled: ch.enabled,
         created_at: ch.createdAt.toISOString(),
         updated_at: ch.updatedAt.toISOString(),
@@ -43,7 +44,7 @@ channelRoutes.get("/workspaces/:id/channels", async (c) => {
 channelRoutes.post("/workspaces/:id/channels", async (c) => {
   const session = c.get("sessionAuth");
   const workspaceId = c.req.param("id");
-  await assertWorkspaceMembership(session.userId, workspaceId);
+  await assertAdminMembership(session.userId, workspaceId);
 
   const body = createChannelSchema.parse(await c.req.json());
   const db = getDb();
@@ -70,7 +71,7 @@ channelRoutes.post("/workspaces/:id/channels", async (c) => {
       workspace_id: channel!.workspaceId,
       type: channel!.type,
       name: (config["name"] as string) ?? body.name,
-      config,
+      config: redactChannelConfig(config),
       enabled: channel!.enabled,
       created_at: channel!.createdAt.toISOString(),
       updated_at: channel!.updatedAt.toISOString(),

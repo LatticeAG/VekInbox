@@ -19,6 +19,19 @@ export const ID_PREFIXES = {
   asg: "asg_",
   ntf: "ntf_",
   del: "del_",
+  thread: "thread_",
+  case: "case_",
+  stage: "stage_",
+  dec: "dec_",
+  ctx: "ctx_",
+  sched: "sched_",
+  audit: "ledger_",
+  outbox: "outbox_",
+  tmpl: "tmpl_",
+  tver: "tver_",
+  policy: "policy_",
+  pver: "pver_",
+  esc: "esc_",
 } as const;
 
 export type IdEntity = keyof typeof ID_PREFIXES;

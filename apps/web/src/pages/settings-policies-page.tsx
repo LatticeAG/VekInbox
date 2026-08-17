@@ -29,6 +29,11 @@ import {
 } from "@/components/ui/table";
 import { useAuth } from "@/contexts/auth-context";
 import { api, ApiClientError } from "@/lib/api";
+import {
+  isSafeLegacyTimeoutOutcome,
+  normalizeLegacyTimeoutOutcome,
+  type SafeLegacyTimeoutOutcome,
+} from "@/lib/approval-safety";
 import { formatDateTime } from "@/lib/format";
 import type { PolicyResponse } from "@latticeag/vekinbox-shared";
 
@@ -48,7 +53,8 @@ export function SettingsPoliciesPage() {
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [name, setName] = useState("");
-  const [defaultAction, setDefaultAction] = useState("decline");
+  const [defaultAction, setDefaultAction] =
+    useState<SafeLegacyTimeoutOutcome>("decline");
   const [steps, setSteps] = useState<PolicyStep[]>([emptyStep()]);
 
   const preview = useMemo(
@@ -102,7 +108,9 @@ export function SettingsPoliciesPage() {
   const startEdit = (policy: PolicyResponse) => {
     setEditingId(policy.id);
     setName(policy.name);
-    setDefaultAction(policy.default_action_on_timeout);
+    setDefaultAction(
+      normalizeLegacyTimeoutOutcome(policy.default_action_on_timeout),
+    );
     setSteps(
       (policy.steps as PolicyStep[]).length > 0
         ? (policy.steps as PolicyStep[])
@@ -150,7 +158,9 @@ export function SettingsPoliciesPage() {
           notify: step.notify,
           message: step.message || undefined,
         })),
-        default_action_on_timeout: defaultAction,
+        // A legacy record may contain an old unsafe value. Never send it back
+        // to the API when this browser saves a policy.
+        default_action_on_timeout: normalizeLegacyTimeoutOutcome(defaultAction),
       };
 
       const created = await api.workspaces.createPolicy(workspace.id, body);
@@ -225,8 +235,18 @@ export function SettingsPoliciesPage() {
                     <TableRow key={policy.id}>
                       <TableCell className="font-medium">{policy.name}</TableCell>
                       <TableCell>{policy.steps.length}</TableCell>
-                      <TableCell className="font-mono text-xs">
-                        {policy.default_action_on_timeout}
+                      <TableCell className="text-xs">
+                        {isSafeLegacyTimeoutOutcome(
+                          policy.default_action_on_timeout,
+                        ) ? (
+                          <span className="font-mono">
+                            {policy.default_action_on_timeout}
+                          </span>
+                        ) : (
+                          <span className="text-destructive">
+                            Unsafe legacy value blocked. Re-save as decline
+                          </span>
+                        )}
                       </TableCell>
                       <TableCell className="text-muted-foreground">
                         {formatDateTime(policy.created_at)}
@@ -274,17 +294,25 @@ export function SettingsPoliciesPage() {
               </div>
 
               <div className="space-y-2">
-                <Label>Default action on timeout</Label>
-                <Select value={defaultAction} onValueChange={setDefaultAction}>
+                <Label>Safe timeout outcome</Label>
+                <Select
+                  value={defaultAction}
+                  onValueChange={(value) =>
+                    setDefaultAction(normalizeLegacyTimeoutOutcome(value))
+                  }
+                >
                   <SelectTrigger>
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="decline">Decline</SelectItem>
-                    <SelectItem value="approve">Approve</SelectItem>
-                    <SelectItem value="escalate">Escalate</SelectItem>
+                    <SelectItem value="escalate">Continue escalation</SelectItem>
                   </SelectContent>
                 </Select>
+                <p className="text-xs leading-relaxed text-muted-foreground">
+                  Silence never authorizes an action. Existing legacy
+                  auto-approve values are converted to decline when saved.
+                </p>
               </div>
 
               <div className="space-y-4">

@@ -1,5 +1,5 @@
-import { eq } from "drizzle-orm";
-import { escalationPolicies, requests, workspaces } from "@latticeag/vekinbox-db";
+import { and, eq, inArray, lte } from "drizzle-orm";
+import { requests } from "@latticeag/vekinbox-db";
 import {
   createQueueConnection,
   enqueueWebhookDelivery,
@@ -28,32 +28,17 @@ export async function processTimeout(job: Job<TimeoutJobData>) {
     return;
   }
 
-  let defaultAction = request.defaultAction ?? "decline";
-
-  if (request.escalationPolicyId) {
-    const [policy] = await db
-      .select()
-      .from(escalationPolicies)
-      .where(eq(escalationPolicies.id, request.escalationPolicyId))
-      .limit(1);
-    if (policy?.defaultActionOnTimeout) {
-      defaultAction = policy.defaultActionOnTimeout;
-    }
-  }
-
-  const [workspace] = await db
-    .select()
-    .from(workspaces)
-    .where(eq(workspaces.id, request.workspaceId))
-    .limit(1);
-
-  const settings = (workspace?.settings as { allow_auto_approve_on_timeout?: boolean }) ?? {};
-  if (!settings.allow_auto_approve_on_timeout && defaultAction === "approve") {
-    defaultAction = "decline";
-  }
+  // Silence is never approval. Legacy policies allowed arbitrary strings here,
+  // and the old action mapper treated unknown actions as approved. Until a v3
+  // policy engine supplies an explicit safe timeout outcome, workers always
+  // decline an unanswered request.
+  const defaultAction = "decline";
 
   const now = new Date();
-  const newStatus = actionToStatus(defaultAction) as typeof request.status;
+  const newStatus = actionToStatus(defaultAction);
+  if (!newStatus) {
+    throw new Error("The built-in timeout action must map to a terminal status");
+  }
   const resolutionPayload = {
     action: defaultAction,
     reason: "timeout",
@@ -70,8 +55,23 @@ export async function processTimeout(job: Job<TimeoutJobData>) {
       resolutionPayload,
       updatedAt: now,
     })
-    .where(eq(requests.id, requestId))
+    .where(
+      and(
+        eq(requests.id, requestId),
+        inArray(requests.status, ["pending", "escalated"]),
+        // A request may have been rescheduled after this worker read it. Keep
+        // the timeout transition conditional on the deadline still being due
+        // so an old delayed job cannot override the newer schedule.
+        lte(requests.timeoutAt, now),
+      ),
+    )
     .returning();
+
+  // A human decision or cancellation won the race after our read. Do not add
+  // a contradictory timeout audit record or resume webhook.
+  if (!updated) {
+    return;
+  }
 
   await appendRequestEvent({
     requestId,

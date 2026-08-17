@@ -13,6 +13,7 @@
   },
   "scripts": {
     "build": "tsc",
+    "typecheck": "tsc --noEmit",
     "dev": "tsc --watch",
     "generate": "drizzle-kit generate",
     "migrate": "tsx src/migrate.ts",

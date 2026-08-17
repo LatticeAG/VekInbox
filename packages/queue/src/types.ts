@@ -12,6 +12,7 @@ export type QueueName = (typeof QUEUE_NAMES)[keyof typeof QUEUE_NAMES];
 export const WEBHOOK_JOB = "deliver" as const;
 export const NOTIFICATION_EMAIL_JOB = "email" as const;
 export const NOTIFICATION_SLACK_JOB = "slack" as const;
+export const NOTIFICATION_SMS_JOB = "sms" as const;
 export const ESCALATION_JOB = "escalate" as const;
 export const TIMEOUT_JOB = "timeout" as const;
 
@@ -36,7 +37,19 @@ export interface NotificationSlackJobData {
   channelType: "slack";
 }
 
-export type NotificationJobData = NotificationEmailJobData | NotificationSlackJobData;
+/** SMS is deliberately a placeholder until endpoint consent/binding is persisted. */
+export interface NotificationSmsJobData {
+  requestId: string;
+  channelType: "sms";
+  phoneNumber: string;
+  userId?: string;
+  channelId?: string;
+}
+
+export type NotificationJobData =
+  | NotificationEmailJobData
+  | NotificationSlackJobData
+  | NotificationSmsJobData;
 
 export interface EscalationJobData {
   requestId: string;

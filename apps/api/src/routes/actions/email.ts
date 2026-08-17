@@ -8,14 +8,26 @@ import { getDb } from "../../lib/db.js";
 
 export const emailActionRoutes = new Hono();
 
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
 function confirmPageHtml(params: {
   title: string;
   action: string;
   token: string;
   error?: string;
 }): string {
+  const title = escapeHtml(params.title);
+  const action = escapeHtml(params.action);
+  const token = escapeHtml(params.token);
   const errorBlock = params.error
-    ? `<p style="color:#b91c1c;margin-bottom:1rem">${params.error}</p>`
+    ? `<p style="color:#b91c1c;margin-bottom:1rem">${escapeHtml(params.error)}</p>`
     : "";
 
   return `<!DOCTYPE html>
@@ -23,7 +35,7 @@ function confirmPageHtml(params: {
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>${params.title}</title>
+  <title>${title}</title>
   <style>
     body { font-family: system-ui, sans-serif; max-width: 32rem; margin: 4rem auto; padding: 0 1rem; color: #111; }
     button { background: #111; color: #fff; border: 0; padding: 0.75rem 1.25rem; border-radius: 0.375rem; cursor: pointer; }
@@ -31,11 +43,11 @@ function confirmPageHtml(params: {
   </style>
 </head>
 <body>
-  <h1>${params.title}</h1>
+  <h1>${title}</h1>
   ${errorBlock}
-  <p>Confirm action: <strong>${params.action}</strong></p>
+  <p>Confirm action: <strong>${action}</strong></p>
   <form method="POST" action="/v1/actions/email/confirm">
-    <input type="hidden" name="token" value="${params.token}" />
+    <input type="hidden" name="token" value="${token}" />
     <button type="submit">Confirm</button>
   </form>
 </body>
@@ -64,7 +76,11 @@ emailActionRoutes.get("/email", async (c) => {
     throw notFound("Request", payload.request_id);
   }
 
-  if (row.status !== "pending" && row.status !== "changes_requested") {
+  if (
+    row.status !== "pending" &&
+    row.status !== "changes_requested" &&
+    row.status !== "escalated"
+  ) {
     return c.html(
       confirmPageHtml({
         title: row.title,
@@ -117,7 +133,11 @@ emailActionRoutes.post("/email/confirm", async (c) => {
     throw notFound("Request", payload.request_id);
   }
 
-  if (row.status !== "pending" && row.status !== "changes_requested") {
+  if (
+    row.status !== "pending" &&
+    row.status !== "changes_requested" &&
+    row.status !== "escalated"
+  ) {
     throw requestNotResolvable(payload.request_id, row.status);
   }
 

@@ -18,7 +18,9 @@ import {
   users,
   workspaces,
 } from "@latticeag/vekinbox-db";
-import { app } from "../dist/app.js";
+// Exercise TypeScript source through Vitest. The package's published entrypoint
+// intentionally lives in dist/, which is not present in a clean checkout.
+import { app } from "../src/app.ts";
 
 export interface TestFixtures {
   orgId: string;
@@ -222,9 +224,11 @@ export async function apiFetch(
     sessionCookie?: string;
     body?: unknown;
     query?: Record<string, string>;
+    /** Extra protocol headers, e.g. V3 idempotency and optimistic-lock headers. */
+    headers?: Record<string, string>;
   } = {},
 ): Promise<Response> {
-  const routePath = path.startsWith("/v1")
+  const routePath = path.startsWith("/v1") || path.startsWith("/v2")
     ? path
     : `/v1${path.startsWith("/") ? path : `/${path}`}`;
 
@@ -247,6 +251,7 @@ export async function apiFetch(
   if (options.body !== undefined) {
     headers["Content-Type"] = "application/json";
   }
+  Object.assign(headers, options.headers);
 
   return app.request(fullPath, {
     method: options.method ?? "GET",

@@ -15,6 +15,7 @@ import { webhookRoutes } from "./routes/webhooks.js";
 import { emailActionRoutes } from "./routes/actions/email.js";
 import { slackRoutes } from "./routes/integrations/slack.js";
 import { eventsRoutes } from "./routes/events.js";
+import { v2ApprovalRoutes } from "./routes/v2-approvals.js";
 
 function getCorsOrigins(): string[] {
   const origins = ["http://localhost:5173"];
@@ -40,7 +41,7 @@ function mountStaticUi(app: Hono) {
 
   app.get("*", async (c, next) => {
     const path = c.req.path;
-    if (path.startsWith("/v1") || path === "/health") {
+    if (path.startsWith("/v1") || path.startsWith("/v2") || path === "/health") {
       return next();
     }
     return serveStatic({ root: webDist, path: "index.html" })(c, next);
@@ -56,11 +57,12 @@ export function createApp() {
       origin: getCorsOrigins(),
       credentials: true,
       allowMethods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-      allowHeaders: ["Content-Type", "Authorization"],
+      allowHeaders: ["Content-Type", "Authorization", "Idempotency-Key", "If-Match"],
     }),
   );
 
   app.use("/v1/*", rateLimit);
+  app.use("/v2/*", rateLimit);
 
   app.onError(errorHandler);
 
@@ -75,6 +77,7 @@ export function createApp() {
   app.route("/v1/integrations/slack", slackRoutes);
   app.route("/v1", policyRoutes);
   app.route("/v1", channelRoutes);
+  app.route("/v2", v2ApprovalRoutes);
 
   mountStaticUi(app);
 

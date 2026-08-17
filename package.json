@@ -7,6 +7,8 @@
     "worker:dev": "pnpm --filter @latticeag/vekinbox-worker dev",
     "test": "vitest run",
     "test:watch": "vitest",
+    "pretypecheck": "pnpm build",
+    "typecheck": "pnpm -r --if-present typecheck",
     "db:generate": "pnpm --filter @latticeag/vekinbox-db generate",
     "db:migrate": "pnpm --filter @latticeag/vekinbox-db migrate",
     "db:seed": "pnpm --filter @latticeag/vekinbox-db seed"

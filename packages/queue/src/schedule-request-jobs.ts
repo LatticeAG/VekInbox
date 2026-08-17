@@ -89,7 +89,12 @@ export async function scheduleRequestJobs(
     const [policy] = await db
       .select()
       .from(escalationPolicies)
-      .where(eq(escalationPolicies.id, request.escalationPolicyId))
+      .where(
+        and(
+          eq(escalationPolicies.id, request.escalationPolicyId),
+          eq(escalationPolicies.workspaceId, request.workspaceId),
+        ),
+      )
       .limit(1);
 
     const steps = (policy?.steps as EscalationStep[] | undefined) ?? [];

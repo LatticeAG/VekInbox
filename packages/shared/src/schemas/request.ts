@@ -1,5 +1,10 @@
 import { z } from "zod";
-import { REQUEST_PRIORITIES, REQUEST_STATUSES, STANDARD_ACTIONS } from "../constants.js";
+import {
+  REQUEST_PRIORITIES,
+  REQUEST_STATUSES,
+  STANDARD_ACTIONS,
+  type RequestStatus,
+} from "../constants.js";
 
 const actionSchema = z.union([
   z.enum(STANDARD_ACTIONS),
@@ -92,7 +97,14 @@ export const requestEventResponseSchema = z.object({
 
 export type RequestEventResponse = z.infer<typeof requestEventResponseSchema>;
 
-export function actionToStatus(action: string): string {
+/**
+ * Legacy request actions only have an outcome mapping for the three explicit
+ * standard decisions. A custom action may be displayed by the v1 UI, but it
+ * must not silently become an approval merely because it lacks a mapping.
+ */
+export function actionToStatus(
+  action: string,
+): Extract<RequestStatus, "approved" | "declined" | "changes_requested"> | null {
   switch (action) {
     case "approve":
       return "approved";
@@ -101,7 +113,7 @@ export function actionToStatus(action: string): string {
     case "request_changes":
       return "changes_requested";
     default:
-      return "approved";
+      return null;
   }
 }
 

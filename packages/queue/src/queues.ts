@@ -4,6 +4,7 @@ import {
   ESCALATION_JOB,
   NOTIFICATION_EMAIL_JOB,
   NOTIFICATION_SLACK_JOB,
+  NOTIFICATION_SMS_JOB,
   QUEUE_NAMES,
   TIMEOUT_JOB,
   WEBHOOK_JOB,
@@ -59,8 +60,16 @@ export function enqueueNotification(
     } as JobsOptions) as Promise<Job<NotificationJobData>>;
   }
 
-  return queue.add(NOTIFICATION_SLACK_JOB, data, {
-    jobId: `notify:slack:${data.requestId}:${data.channelId}`,
+  if (data.channelType === "slack") {
+    return queue.add(NOTIFICATION_SLACK_JOB, data, {
+      jobId: `notify:slack:${data.requestId}:${data.channelId}`,
+      removeOnComplete: 1000,
+      removeOnFail: 5000,
+    } as JobsOptions) as Promise<Job<NotificationJobData>>;
+  }
+
+  return queue.add(NOTIFICATION_SMS_JOB, data, {
+    jobId: `notify:sms:${data.requestId}:${data.channelId ?? data.userId ?? "recipient"}`,
     removeOnComplete: 1000,
     removeOnFail: 5000,
   } as JobsOptions) as Promise<Job<NotificationJobData>>;

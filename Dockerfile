@@ -12,7 +12,11 @@ COPY apps/api/package.json ./apps/api/
 COPY apps/web/package.json ./apps/web/
 COPY apps/worker/package.json ./apps/worker/
 COPY packages/cli/package.json ./packages/cli/
+COPY packages/core/package.json ./packages/core/
 COPY packages/db/package.json ./packages/db/
+COPY packages/integration-core/package.json ./packages/integration-core/
+COPY packages/langchain/package.json ./packages/langchain/
+COPY packages/ai-sdk/package.json ./packages/ai-sdk/
 COPY packages/queue/package.json ./packages/queue/
 COPY packages/sdk/package.json ./packages/sdk/
 COPY packages/shared/package.json ./packages/shared/
@@ -23,7 +27,11 @@ COPY . .
 RUN pnpm --filter @latticeag/vekinbox-shared build \
   && pnpm --filter @latticeag/vekinbox-db build \
   && pnpm --filter @latticeag/vekinbox-queue build \
+  && pnpm --filter @latticeag/vekinbox-core build \
   && pnpm --filter @latticeag/vekinbox build \
+  && pnpm --filter @latticeag/vekinbox-integration-core build \
+  && pnpm --filter @latticeag/vekinbox-langchain build \
+  && pnpm --filter @latticeag/vekinbox-ai-sdk build \
   && pnpm --filter @latticeag/vekinbox-cli build \
   && pnpm --filter @latticeag/vekinbox-api build \
   && pnpm --filter @latticeag/vekinbox-worker build

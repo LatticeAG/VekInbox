@@ -1,13 +1,19 @@
-import { ArrowLeft, Bot, Check, MessageSquare, X } from "lucide-react";
+import { ArrowLeft, Bot } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import { Link, useParams } from "react-router-dom";
 import { toast } from "sonner";
+import { ApprovalReviewSummary } from "@/components/approval-review-summary";
 import { AssigneesDisplay } from "@/components/assignees-display";
 import { AuditTimeline } from "@/components/audit-timeline";
-import { ConfirmActionDialog } from "@/components/confirm-action-dialog";
+import {
+  ConfirmActionDialog,
+  type DecisionSubmission,
+} from "@/components/confirm-action-dialog";
+import { DecisionPanel } from "@/components/decision-panel";
 import { PriorityBadge } from "@/components/priority-badge";
 import { RequestDetailSkeleton } from "@/components/request-detail-skeleton";
+import { ReviewContextPanel } from "@/components/review-context-panel";
 import { StatusBadge } from "@/components/status-badge";
 import { WebhookDeliveriesPanel } from "@/components/webhook-deliveries-panel";
 import { Button } from "@/components/ui/button";
@@ -19,15 +25,31 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { api, ApiClientError, type RequestDetail } from "@/lib/api";
+import { createApprovalReviewContext } from "@/lib/approval-context";
+import {
+  isSafeLegacyDecisionAction,
+  partitionLegacyDecisionActions,
+  redactLegacyAuditPayload,
+} from "@/lib/approval-safety";
 import { formatDateTime, formatTimeout, isPending } from "@/lib/format";
 
-type ActionName = "approve" | "decline" | "request_changes";
+function humanizeAction(action: string): string {
+  switch (action) {
+    case "approve":
+      return "Approve";
+    case "decline":
+      return "Decline";
+    case "request_changes":
+      return "Request changes";
+    default:
+      return action.replace(/[_-]+/g, " ");
+  }
+}
 
-const actionLabels: Record<ActionName, string> = {
-  approve: "Approved",
-  decline: "Declined",
-  request_changes: "Changes requested",
-};
+function resolutionNote(request: RequestDetail): string | null {
+  const note = request.resolution_payload?.["note"];
+  return typeof note === "string" && note.trim() ? note : null;
+}
 
 export function RequestDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -35,7 +57,7 @@ export function RequestDetailPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState(false);
-  const [confirmAction, setConfirmAction] = useState<ActionName | null>(null);
+  const [confirmAction, setConfirmAction] = useState<string | null>(null);
 
   const fetchRequest = useCallback(async () => {
     if (!id) return;
@@ -59,31 +81,36 @@ export function RequestDetailPage() {
     void fetchRequest();
   }, [fetchRequest]);
 
-  const handleAction = async (action: ActionName) => {
+  const executeAction = async (
+    action: string,
+    submission: DecisionSubmission,
+  ) => {
     if (!request) return;
 
-    if (request.priority === "critical") {
-      setConfirmAction(action);
+    if (!isSafeLegacyDecisionAction(action)) {
+      const message =
+        "This custom legacy action cannot be submitted because its outcome is not safely defined.";
+      setConfirmAction(null);
+      setError(message);
+      toast.error(message);
       return;
     }
 
-    await executeAction(action);
-  };
-
-  const executeAction = async (action: ActionName) => {
-    if (!request) return;
     setActionLoading(true);
     setError(null);
     try {
-      await api.requests.action(request.id, action);
+      const payload = submission.acknowledgedContextItems.length
+        ? { acknowledged_context_items: submission.acknowledgedContextItems }
+        : undefined;
+      await api.requests.action(request.id, action, submission.note, payload);
       setConfirmAction(null);
-      toast.success(`Request ${actionLabels[action].toLowerCase()}`);
+      toast.success(`Request ${humanizeAction(action).toLowerCase()}`);
       await fetchRequest();
     } catch (err) {
       const message =
         err instanceof ApiClientError
           ? err.message
-          : "Failed to perform action";
+          : "Failed to record decision";
       setError(message);
       toast.error(message);
     } finally {
@@ -104,7 +131,7 @@ export function RequestDetailPage() {
             Back to inbox
           </Link>
         </Button>
-        <p className="rounded-md border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+        <p role="alert" className="rounded-md border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
           {error}
         </p>
       </div>
@@ -114,88 +141,87 @@ export function RequestDetailPage() {
   if (!request) return null;
 
   const pending = isPending(request.status);
+  const review = createApprovalReviewContext({
+    title: request.title,
+    requestId: request.id,
+    requestKey: request.key,
+    priority: request.priority,
+    status: request.status,
+    timeoutAt: request.timeout_at,
+    escalationPolicyId: request.escalation_policy_id,
+    metadata: request.metadata,
+  });
+  const safeMetadata = redactLegacyAuditPayload(request.metadata);
+  const { safeActions, blockedActionNames } = partitionLegacyDecisionActions(
+    request.actions,
+  );
+  const availableActions = safeActions.map((action) => ({
+    name: action.name,
+    label: action.label,
+  }));
+  const selectedAction = confirmAction
+    ? availableActions.find((action) => action.name === confirmAction)
+    : undefined;
+  const selectedActionLabel = selectedAction?.label ??
+    (confirmAction ? humanizeAction(confirmAction) : undefined);
+  const requiresRationale = Boolean(
+    review.rationaleRequired ||
+      request.priority === "critical" ||
+      confirmAction === "request_changes",
+  );
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-        <div className="space-y-3 min-w-0">
-          <Button variant="ghost" size="sm" asChild>
-            <Link to="/inbox">
-              <ArrowLeft className="mr-1.5 h-4 w-4" />
-              Back to inbox
-            </Link>
-          </Button>
+      <div className="space-y-3">
+        <Button variant="ghost" size="sm" asChild>
+          <Link to="/inbox">
+            <ArrowLeft className="mr-1.5 h-4 w-4" />
+            Back to inbox
+          </Link>
+        </Button>
 
-          <div className="flex flex-wrap items-center gap-2">
-            <PriorityBadge priority={request.priority} />
-            <StatusBadge status={request.status} />
-          </div>
-
-          <h1 className="text-2xl font-semibold tracking-tight break-words">
-            {request.title}
-          </h1>
-
-          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-muted-foreground">
-            <span className="flex items-center gap-1.5">
-              <Bot className="h-4 w-4 shrink-0" />
-              <span className="font-mono text-xs break-all">{request.agent_id}</span>
-            </span>
-            <span>Created {formatDateTime(request.created_at)}</span>
-            {request.timeout_at && (
-              <span>Timeout {formatTimeout(request.timeout_at)}</span>
-            )}
-          </div>
-
-          <p className="font-mono text-xs text-muted-foreground break-all">
-            {request.id} · {request.key}
-          </p>
+        <div className="flex flex-wrap items-center gap-2">
+          <PriorityBadge priority={request.priority} />
+          <StatusBadge status={request.status} />
         </div>
 
-        {pending && (
-          <div className="flex shrink-0 flex-wrap gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={actionLoading}
-              onClick={() => handleAction("request_changes")}
-            >
-              <MessageSquare className="mr-1.5 h-4 w-4" />
-              <span className="hidden sm:inline">Request changes</span>
-              <span className="sm:hidden">Changes</span>
-            </Button>
-            <Button
-              variant="destructive"
-              size="sm"
-              disabled={actionLoading}
-              onClick={() => handleAction("decline")}
-            >
-              <X className="mr-1.5 h-4 w-4" />
-              Decline
-            </Button>
-            <Button
-              size="sm"
-              disabled={actionLoading}
-              onClick={() => handleAction("approve")}
-            >
-              <Check className="mr-1.5 h-4 w-4" />
-              Approve
-            </Button>
-          </div>
-        )}
+        <h1 className="max-w-4xl break-words text-2xl font-semibold tracking-tight sm:text-3xl">
+          {request.title}
+        </h1>
+
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-muted-foreground">
+          <span className="flex items-center gap-1.5">
+            <Bot className="h-4 w-4 shrink-0" />
+            <span className="break-all font-mono text-xs">{request.agent_id}</span>
+          </span>
+          <span>Created {formatDateTime(request.created_at)}</span>
+          {request.timeout_at && <span>Deadline {formatTimeout(request.timeout_at)}</span>}
+        </div>
+
+        <p className="break-all font-mono text-xs text-muted-foreground">
+          {request.id} · {request.key}
+        </p>
       </div>
 
       {error && (
-        <p className="rounded-md border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+        <p role="alert" className="rounded-md border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
           {error}
         </p>
       )}
 
-      <div className="grid gap-6 lg:grid-cols-3">
-        <div className="space-y-6 lg:col-span-2">
+      <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_20rem]">
+        <div className="min-w-0 space-y-6">
+          <ApprovalReviewSummary review={review} timeoutAt={request.timeout_at} />
+
+          <ReviewContextPanel review={review} />
+
           {request.description && (
             <Card>
               <CardHeader>
-                <CardTitle className="text-base">Description</CardTitle>
+                <CardTitle className="text-base">Agent description</CardTitle>
+                <CardDescription>
+                  Original request description, retained as supporting context.
+                </CardDescription>
               </CardHeader>
               <CardContent>
                 <div className="prose-inbox">
@@ -208,15 +234,22 @@ export function RequestDetailPage() {
           {request.metadata && Object.keys(request.metadata).length > 0 && (
             <Card>
               <CardHeader>
-                <CardTitle className="text-base">Metadata</CardTitle>
+                <CardTitle className="text-base">Technical metadata</CardTitle>
                 <CardDescription>
-                  Agent-provided context for this request.
+                  Raw compatibility metadata is secondary to the structured
+                  review context above. Sensitive fields are redacted in this
+                  legacy browser view.
                 </CardDescription>
               </CardHeader>
               <CardContent>
-                <pre className="overflow-x-auto rounded-md bg-muted/50 p-4 font-mono text-xs leading-relaxed">
-                  {JSON.stringify(request.metadata, null, 2)}
-                </pre>
+                <details className="rounded-md border bg-muted/[0.18] p-3">
+                  <summary className="cursor-pointer text-sm font-medium">
+                    Show raw JSON
+                  </summary>
+                  <pre className="mt-3 overflow-x-auto font-mono text-xs leading-relaxed">
+                    {JSON.stringify(safeMetadata, null, 2)}
+                  </pre>
+                </details>
               </CardContent>
             </Card>
           )}
@@ -227,10 +260,25 @@ export function RequestDetailPage() {
           />
         </div>
 
-        <div className="space-y-6">
+        <aside className="min-w-0 space-y-6">
+          <div className="xl:sticky xl:top-20">
+            <DecisionPanel
+              actions={availableActions}
+              actionLoading={actionLoading}
+              pending={pending}
+              priority={request.priority}
+              status={request.status}
+              timeoutAt={request.timeout_at}
+              review={review}
+              resolutionNote={resolutionNote(request)}
+              blockedActionNames={blockedActionNames}
+              onAction={setConfirmAction}
+            />
+          </div>
+
           <Card>
             <CardHeader>
-              <CardTitle className="text-base">Details</CardTitle>
+              <CardTitle className="text-base">Request facts</CardTitle>
             </CardHeader>
             <CardContent className="space-y-3 text-sm">
               <div className="flex justify-between gap-4">
@@ -243,20 +291,18 @@ export function RequestDetailPage() {
               </div>
               <div className="flex justify-between gap-4">
                 <span className="text-muted-foreground">Agent</span>
-                <span className="truncate font-mono text-xs">
-                  {request.agent_id}
-                </span>
+                <span className="truncate font-mono text-xs">{request.agent_id}</span>
               </div>
               {request.resolved_at && (
                 <div className="flex justify-between gap-4">
                   <span className="text-muted-foreground">Resolved</span>
-                  <span>{formatDateTime(request.resolved_at)}</span>
+                  <span className="text-right">{formatDateTime(request.resolved_at)}</span>
                 </div>
               )}
               {request.resolved_by && (
                 <div className="flex justify-between gap-4">
                   <span className="text-muted-foreground">Resolved by</span>
-                  <span className="font-mono text-xs">{request.resolved_by}</span>
+                  <span className="break-all text-right font-mono text-xs">{request.resolved_by}</span>
                 </div>
               )}
             </CardContent>
@@ -265,17 +311,23 @@ export function RequestDetailPage() {
           <AssigneesDisplay assignees={request.assignees} />
 
           <AuditTimeline events={request.events} />
-        </div>
+        </aside>
       </div>
 
       <ConfirmActionDialog
         open={confirmAction !== null}
         onOpenChange={(open) => !open && setConfirmAction(null)}
         action={confirmAction ?? "approve"}
-        title={request.title}
+        actionLabel={selectedActionLabel}
+        actionSummary={review.actionSummary}
+        actionDigest={review.actionDigest}
+        review={review}
         isCritical={request.priority === "critical"}
+        rationaleRequired={requiresRationale}
         loading={actionLoading}
-        onConfirm={() => confirmAction && executeAction(confirmAction)}
+        onConfirm={(submission) =>
+          confirmAction && executeAction(confirmAction, submission)
+        }
       />
     </div>
   );

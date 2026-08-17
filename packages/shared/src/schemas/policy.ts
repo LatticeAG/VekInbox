@@ -14,7 +14,13 @@ export const createPolicySchema = z.object({
       }),
     )
     .min(1),
-  default_action_on_timeout: z.string().optional().default("decline"),
+  // Timeout is a liveness event, never an authorization decision. Keep the
+  // legacy compatibility surface constrained to safe outcomes at the API
+  // boundary so a stale client cannot reintroduce auto-approve behavior.
+  default_action_on_timeout: z
+    .enum(["decline", "escalate"])
+    .optional()
+    .default("decline"),
 });
 
 export type CreatePolicyInput = z.infer<typeof createPolicySchema>;
@@ -24,6 +30,8 @@ export const policyResponseSchema = z.object({
   workspace_id: z.string(),
   name: z.string(),
   steps: z.array(z.record(z.unknown())),
+  // Historic v1 rows can contain unsafe values. Keep them readable so clients
+  // can label and remediate them, while writes remain constrained above.
   default_action_on_timeout: z.string(),
   created_at: z.string(),
   updated_at: z.string(),

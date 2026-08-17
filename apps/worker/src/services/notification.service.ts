@@ -1,6 +1,5 @@
 import { and, eq } from "drizzle-orm";
 import {
-  agents,
   notificationChannels,
   requestNotifications,
   requests,
@@ -8,8 +7,68 @@ import {
 } from "@latticeag/vekinbox-db";
 import { generateId } from "@latticeag/vekinbox-shared";
 import { getDb } from "../lib/db.js";
-import { sendRequestNotificationEmail } from "./email.service.js";
-import { sendRequestSlackNotification } from "./slack.service.js";
+import {
+  createConfiguredNotificationProviders,
+  type DeliveryOutcome,
+  MultiChannelNotificationDelivery,
+  type NotificationEndpointSnapshot,
+  type NotificationProviderKey,
+} from "./notifications/index.js";
+import { buildLegacyApprovalNotification } from "./notifications/legacy-request-notification.js";
+
+function getNotificationDelivery(slackWebhookUrl?: string): MultiChannelNotificationDelivery {
+  return new MultiChannelNotificationDelivery(
+    createConfiguredNotificationProviders(process.env, undefined, { slackWebhookUrl }),
+  );
+}
+
+async function dispatchLegacyProviderNotification(params: {
+  request: typeof requests.$inferSelect;
+  requestId: string;
+  channelId: string | null;
+  provider: NotificationProviderKey;
+  endpoint: NotificationEndpointSnapshot;
+  slackWebhookUrl?: string;
+}): Promise<void> {
+  const db = getDb();
+  const notificationId = generateId("ntf");
+
+  await db.insert(requestNotifications).values({
+    id: notificationId,
+    requestId: params.requestId,
+    channelId: params.channelId,
+    channelType: params.provider,
+    status: "pending",
+  });
+
+  let outcome: DeliveryOutcome;
+  try {
+    outcome = await getNotificationDelivery(params.slackWebhookUrl).deliver({
+      endpoint: params.endpoint,
+      notification: buildLegacyApprovalNotification(params.request, notificationId),
+    });
+  } catch (error) {
+    await db
+      .update(requestNotifications)
+      .set({ status: "failed", error: "provider_dispatch_error" })
+      .where(eq(requestNotifications.id, notificationId));
+    throw error;
+  }
+
+  const sent = outcome.state === "accepted" || outcome.state === "delivered";
+  await db
+    .update(requestNotifications)
+    .set({
+      status: sent ? "sent" : "failed",
+      sentAt: sent ? new Date() : null,
+      error: sent ? null : outcome.errorCode ?? outcome.state,
+    })
+    .where(eq(requestNotifications.id, notificationId));
+
+  if (outcome.state === "failed_retryable") {
+    throw new Error(`Notification delivery is retryable: ${outcome.errorCode ?? "unknown_error"}`);
+  }
+}
 
 export async function processEmailNotification(params: {
   requestId: string;
@@ -42,43 +101,23 @@ export async function processEmailNotification(params: {
     throw new Error(`Email channel not found: ${params.channelId}`);
   }
 
-  const [agent] = await db.select().from(agents).where(eq(agents.id, request.agentId)).limit(1);
-  const notificationId = generateId("ntf");
-
-  await db.insert(requestNotifications).values({
-    id: notificationId,
+  await dispatchLegacyProviderNotification({
+    request,
     requestId: params.requestId,
     channelId: params.channelId,
-    channelType: "email",
-    status: "pending",
+    provider: "email",
+    endpoint: {
+      id: `legacy-email:${params.channelId}:${user.id}`,
+      version: 1,
+      provider: "email",
+      destination: user.email,
+      // Existing user/email and administrator-configured channel records are
+      // a compatibility source only; v3 endpoint verification is introduced
+      // separately with its own persisted model.
+      verified: true,
+      consented: true,
+    },
   });
-
-  try {
-    await sendRequestNotificationEmail({
-      to: user.email,
-      userId: user.id,
-      requestId: request.id,
-      title: request.title,
-      description: request.description,
-      priority: request.priority,
-      agentName: agent?.name ?? request.agentId,
-      actions: (request.actions as { name: string; label?: string }[]) ?? [],
-      metadata: (request.metadata as Record<string, unknown>) ?? {},
-      timeoutAt: request.timeoutAt?.toISOString() ?? null,
-    });
-
-    await db
-      .update(requestNotifications)
-      .set({ status: "sent", sentAt: new Date() })
-      .where(eq(requestNotifications.id, notificationId));
-  } catch (err) {
-    const message = err instanceof Error ? err.message : "Unknown error";
-    await db
-      .update(requestNotifications)
-      .set({ status: "failed", error: message })
-      .where(eq(requestNotifications.id, notificationId));
-    throw err;
-  }
 }
 
 export async function processSlackNotification(params: {
@@ -106,48 +145,58 @@ export async function processSlackNotification(params: {
     throw new Error(`Slack channel not found: ${params.channelId}`);
   }
 
-  const config = channel.config as { channel_id?: string; bot_token?: string };
-  if (!config.channel_id) {
-    throw new Error("Slack channel missing channel_id in config");
-  }
-
-  const [agent] = await db.select().from(agents).where(eq(agents.id, request.agentId)).limit(1);
-  const notificationId = generateId("ntf");
-
-  await db.insert(requestNotifications).values({
-    id: notificationId,
+  const config = (channel.config as { channel_id?: string; webhook_url?: string }) ?? {};
+  await dispatchLegacyProviderNotification({
+    request,
     requestId: params.requestId,
     channelId: params.channelId,
-    channelType: "slack",
-    status: "pending",
+    provider: "slack",
+    endpoint: {
+      id: `legacy-slack:${params.channelId}`,
+      version: 1,
+      provider: "slack",
+      // Incoming webhooks target the configured governed channel. The value is
+      // retained only as a redacted endpoint hint and is never sent as an
+      // action identity.
+      destination: config.channel_id ?? params.channelId,
+      verified: true,
+      consented: true,
+    },
+    // A channel-owned webhook is preferred over a process-wide fallback. The
+    // adapter validates its HTTPS Slack host before any network request.
+    slackWebhookUrl: config.webhook_url,
   });
+}
 
-  try {
-    await sendRequestSlackNotification({
-      requestId: request.id,
-      title: request.title,
-      description: request.description,
-      priority: request.priority,
-      agentName: agent?.name ?? request.agentId,
-      actions: (request.actions as { name: string; label?: string }[]) ?? [],
-      metadata: (request.metadata as Record<string, unknown>) ?? {},
-      timeoutAt: request.timeoutAt?.toISOString() ?? null,
-      channelConfig: {
-        channel_id: config.channel_id,
-        bot_token: config.bot_token,
-      },
-    });
-
-    await db
-      .update(requestNotifications)
-      .set({ status: "sent", sentAt: new Date() })
-      .where(eq(requestNotifications.id, notificationId));
-  } catch (err) {
-    const message = err instanceof Error ? err.message : "Unknown error";
-    await db
-      .update(requestNotifications)
-      .set({ status: "failed", error: message })
-      .where(eq(requestNotifications.id, notificationId));
-    throw err;
+/**
+ * SMS has no legacy channel schema yet. This processor makes the placeholder
+ * reachable through the same queue/registry boundary so a future endpoint
+ * implementation is auditable and cannot grow a direct-approval bypass.
+ */
+export async function processSmsNotification(params: {
+  requestId: string;
+  userId?: string;
+  phoneNumber: string;
+  channelId?: string;
+}) {
+  const db = getDb();
+  const [request] = await db.select().from(requests).where(eq(requests.id, params.requestId)).limit(1);
+  if (!request) {
+    throw new Error(`Request not found: ${params.requestId}`);
   }
+
+  await dispatchLegacyProviderNotification({
+    request,
+    requestId: params.requestId,
+    channelId: params.channelId ?? null,
+    provider: "sms",
+    endpoint: {
+      id: params.channelId ?? `legacy-sms:${params.userId ?? "recipient"}`,
+      version: 1,
+      provider: "sms",
+      destination: params.phoneNumber,
+      verified: true,
+      consented: true,
+    },
+  });
 }

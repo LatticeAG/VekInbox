@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@hono/node-server": "^1.13.7",
+    "@latticeag/vekinbox-core": "workspace:*",
     "@latticeag/vekinbox-db": "workspace:*",
     "@latticeag/vekinbox-queue": "workspace:*",
     "@latticeag/vekinbox-shared": "workspace:*",

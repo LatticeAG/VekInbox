@@ -298,10 +298,18 @@ export const api = {
       return { ...req, events: eventsRes.data };
     },
 
-    action(id: string, action: string, note?: string) {
+    action(
+      id: string,
+      action: string,
+      note?: string,
+      payload?: Record<string, unknown>,
+    ) {
       return request<RequestResponse>(`/v1/requests/${id}/actions/${action}`, {
         method: "POST",
-        body: JSON.stringify({ note }),
+        body: JSON.stringify({
+          note,
+          ...(payload ? { payload } : {}),
+        }),
       });
     },
 

@@ -1,13 +1,20 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { eq } from "drizzle-orm";
+import { requests } from "@latticeag/vekinbox-db";
 import {
   apiFetch,
   createTestFixtures,
+  getTestDb,
   setupTestDatabase,
   teardownTestDatabase,
   type TestFixtures,
 } from "./helpers.js";
 
-describe("requests integration", () => {
+// A clean source checkout can run the unit suite without a local Postgres
+// service. CI and developers with DATABASE_URL still exercise these tests.
+const describeIntegration = process.env["DATABASE_URL"] ? describe : describe.skip;
+
+describeIntegration("requests integration", () => {
   let fixtures: TestFixtures;
 
   beforeAll(async () => {
@@ -92,6 +99,60 @@ describe("requests integration", () => {
     expect(resolveRes.status).toBe(200);
     const resolved = (await resolveRes.json()) as { status: string };
     expect(resolved.status).toBe("approved");
+  });
+
+  it("rejects a custom action without a legacy outcome mapping", async () => {
+    const key = `custom-action.${Date.now()}`;
+    const createRes = await apiFetch("/requests", {
+      method: "POST",
+      apiKey: fixtures.apiKeyA,
+      body: {
+        workspace_id: fixtures.workspaceA,
+        key,
+        title: "Custom action safety test",
+        actions: ["run_custom_operation"],
+      },
+    });
+    const created = (await createRes.json()) as { id: string };
+
+    const resolveRes = await apiFetch(`/requests/${created.id}/actions/run_custom_operation`, {
+      method: "POST",
+      sessionCookie: fixtures.sessionCookieA,
+      body: {},
+    });
+
+    expect(resolveRes.status).toBe(400);
+    expect(await resolveRes.json()).toMatchObject({
+      error: { code: "invalid_action" },
+    });
+  });
+
+  it("keeps an escalated request resolvable by an authenticated reviewer", async () => {
+    const key = `escalated.${Date.now()}`;
+    const createRes = await apiFetch("/requests", {
+      method: "POST",
+      apiKey: fixtures.apiKeyA,
+      body: {
+        workspace_id: fixtures.workspaceA,
+        key,
+        title: "Escalated request remains actionable",
+      },
+    });
+    const created = (await createRes.json()) as { id: string };
+
+    await getTestDb()
+      .update(requests)
+      .set({ status: "escalated", updatedAt: new Date() })
+      .where(eq(requests.id, created.id));
+
+    const resolveRes = await apiFetch(`/requests/${created.id}/actions/decline`, {
+      method: "POST",
+      sessionCookie: fixtures.sessionCookieA,
+      body: { note: "Handled after escalation" },
+    });
+
+    expect(resolveRes.status).toBe(200);
+    expect(await resolveRes.json()).toMatchObject({ status: "declined" });
   });
 
   it("enforces tenant isolation", async () => {

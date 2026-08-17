@@ -10,6 +10,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@latticeag/vekinbox-core": "workspace:*",
     "@latticeag/vekinbox-db": "workspace:*",
     "@latticeag/vekinbox-queue": "workspace:*",
     "@latticeag/vekinbox-shared": "workspace:*",

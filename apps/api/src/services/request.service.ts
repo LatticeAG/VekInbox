@@ -6,6 +6,7 @@ import {
   notFound,
   requestAlreadyResolved,
   requestNotResolvable,
+  validationError,
   type CreateRequestApiInput,
   type ListRequestsQuery,
   type RequestResponse,
@@ -14,6 +15,8 @@ import {
 import { createQueueConnection, scheduleRequestJobs } from "@latticeag/vekinbox-queue";
 import { and, desc, eq, inArray, isNotNull, lt, sql } from "drizzle-orm";
 import {
+  escalationPolicies,
+  memberships,
   requestAssignments,
   requests,
   workspaces,
@@ -130,6 +133,40 @@ export async function createRequest(
   }
 
   const actions = normalizeActions(input.actions);
+  if (input.escalation_policy_id) {
+    const [policy] = await db
+      .select({ id: escalationPolicies.id })
+      .from(escalationPolicies)
+      .where(
+        and(
+          eq(escalationPolicies.id, input.escalation_policy_id),
+          eq(escalationPolicies.workspaceId, input.workspace_id),
+        ),
+      )
+      .limit(1);
+    if (!policy) {
+      throw validationError("escalation_policy_id must belong to the request workspace");
+    }
+  }
+
+  const assignees = [...new Set(input.assignees ?? [])];
+  if (assignees.length !== (input.assignees?.length ?? 0)) {
+    throw validationError("assignees cannot contain duplicates");
+  }
+  if (assignees.length > 0) {
+    const assigneeMemberships = await db
+      .select({ userId: memberships.userId })
+      .from(memberships)
+      .where(
+        and(
+          eq(memberships.workspaceId, input.workspace_id),
+          inArray(memberships.userId, assignees),
+        ),
+      );
+    if (assigneeMemberships.length !== assignees.length) {
+      throw validationError("every assignee must be a member of the request workspace");
+    }
+  }
   const now = new Date();
   const id = generateId("req");
 
@@ -157,9 +194,9 @@ export async function createRequest(
     })
     .returning();
 
-  if (input.assignees?.length) {
+  if (assignees.length) {
     await db.insert(requestAssignments).values(
-      input.assignees.map((userId) => ({
+      assignees.map((userId) => ({
         id: generateId("asg"),
         requestId: id,
         userId,
@@ -181,7 +218,7 @@ export async function createRequest(
     await scheduleRequestJobs(connection, getDb(), id);
   }
 
-  return mapRequest(created!, input.assignees ?? []);
+  return mapRequest(created!, assignees);
 }
 
 export async function listRequests(
@@ -254,7 +291,11 @@ export async function resolveRequest(params: {
     throw notFound("Request", params.requestId);
   }
 
-  if (row.status !== "pending" && row.status !== "changes_requested") {
+  if (
+    row.status !== "pending" &&
+    row.status !== "changes_requested" &&
+    row.status !== "escalated"
+  ) {
     if (row.status === "approved" || row.status === "declined" || row.status === "cancelled") {
       throw requestAlreadyResolved(params.requestId, row.status);
     }
@@ -267,7 +308,12 @@ export async function resolveRequest(params: {
     throw invalidAction(params.requestId, params.action);
   }
 
-  const newStatus = actionToStatus(params.action) as typeof row.status;
+  const newStatus = actionToStatus(params.action);
+  if (!newStatus) {
+    // A legacy custom action has no policy-authored outcome mapping. Reject it
+    // rather than defaulting to approval.
+    throw invalidAction(params.requestId, params.action);
+  }
   const now = new Date();
   const resolutionPayload = {
     action: params.action,
@@ -286,8 +332,18 @@ export async function resolveRequest(params: {
       resolutionPayload,
       updatedAt: now,
     })
-    .where(eq(requests.id, params.requestId))
+    .where(
+      and(
+        eq(requests.id, params.requestId),
+        eq(requests.workspaceId, params.workspaceId),
+        eq(requests.status, row.status),
+      ),
+    )
     .returning();
+
+  if (!updated) {
+    throw requestNotResolvable(params.requestId, "state_changed");
+  }
 
   await appendRequestEvent({
     requestId: params.requestId,
@@ -360,8 +416,19 @@ export async function cancelRequest(
       resolutionPayload: { action: "cancel", reason },
       updatedAt: now,
     })
-    .where(eq(requests.id, requestId))
+    .where(
+      and(
+        eq(requests.id, requestId),
+        eq(requests.workspaceId, auth.workspaceId),
+        eq(requests.agentId, auth.agentId),
+        eq(requests.status, row.status),
+      ),
+    )
     .returning();
+
+  if (!updated) {
+    throw requestNotResolvable(requestId, "state_changed");
+  }
 
   await appendRequestEvent({
     requestId,
@@ -427,12 +494,13 @@ export async function processExpiredRequests(): Promise<number> {
     .from(requests)
     .where(
       and(
-        eq(requests.status, "pending"),
+        inArray(requests.status, ["pending", "escalated"]),
         isNotNull(requests.timeoutAt),
         lt(requests.timeoutAt, now),
       ),
     );
 
+  let processed = 0;
   for (const row of expired) {
     const [updated] = await db
       .update(requests)
@@ -444,8 +512,19 @@ export async function processExpiredRequests(): Promise<number> {
         resolutionPayload: { action: "timeout" },
         updatedAt: now,
       })
-      .where(eq(requests.id, row.id))
+      .where(
+        and(
+          eq(requests.id, row.id),
+          inArray(requests.status, ["pending", "escalated"]),
+          lt(requests.timeoutAt, now),
+        ),
+      )
       .returning();
+
+    if (!updated) {
+      continue;
+    }
+    processed += 1;
 
     await appendRequestEvent({
       requestId: row.id,
@@ -455,7 +534,7 @@ export async function processExpiredRequests(): Promise<number> {
       payload: { timeout_at: row.timeoutAt?.toISOString() },
     });
 
-    if (updated && row.resumeWebhookUrl) {
+    if (row.resumeWebhookUrl) {
       const result = mapRequest(updated);
       await queueWebhookDelivery({
         requestId: row.id,
@@ -475,5 +554,5 @@ export async function processExpiredRequests(): Promise<number> {
     }
   }
 
-  return expired.length;
+  return processed;
 }

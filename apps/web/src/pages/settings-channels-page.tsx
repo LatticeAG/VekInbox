@@ -47,8 +47,7 @@ export function SettingsChannelsPage() {
   const [type, setType] = useState<CreateChannelInput["type"]>("email");
   const [name, setName] = useState("");
   const [email, setEmail] = useState(user?.email ?? "");
-  const [slackChannelId, setSlackChannelId] = useState("");
-  const [slackToken, setSlackToken] = useState("");
+  const [slackWebhookUrl, setSlackWebhookUrl] = useState("");
 
   const loadChannels = async () => {
     if (!workspace) {
@@ -86,8 +85,7 @@ export function SettingsChannelsPage() {
     setType("email");
     setName("");
     setEmail(user?.email ?? "");
-    setSlackChannelId("");
-    setSlackToken("");
+    setSlackWebhookUrl("");
     setShowForm(false);
   };
 
@@ -106,14 +104,25 @@ export function SettingsChannelsPage() {
     }
 
     if (type === "slack") {
-      if (!slackChannelId.trim()) {
-        toast.error("Slack channel ID is required");
+      if (!slackWebhookUrl.trim()) {
+        toast.error("Slack incoming webhook URL is required");
         return;
       }
-      config.channel_id = slackChannelId.trim();
-      if (slackToken.trim()) {
-        config.token = slackToken.trim();
+      try {
+        const parsed = new URL(slackWebhookUrl.trim());
+        if (
+          parsed.protocol !== "https:" ||
+          !["hooks.slack.com", "hooks.slack-gov.com"].includes(
+            parsed.hostname.toLowerCase(),
+          )
+        ) {
+          throw new Error("invalid Slack webhook host");
+        }
+      } catch {
+        toast.error("Use an HTTPS Slack incoming webhook URL");
+        return;
       }
+      config.webhook_url = slackWebhookUrl.trim();
     }
 
     setSaving(true);
@@ -152,7 +161,7 @@ export function SettingsChannelsPage() {
           <div>
             <CardTitle className="text-base">Notification channels</CardTitle>
             <CardDescription>
-              Email, Slack, and web channels for escalation notifications.
+              Email, Slack incoming webhooks, and web channels for escalation notifications.
             </CardDescription>
           </div>
           <Button size="sm" onClick={() => setShowForm((v) => !v)}>
@@ -211,32 +220,24 @@ export function SettingsChannelsPage() {
               )}
 
               {type === "slack" && (
-                <>
-                  <div className="space-y-2">
-                    <Label htmlFor="slack-channel-id">Slack channel ID</Label>
-                    <Input
-                      id="slack-channel-id"
-                      value={slackChannelId}
-                      onChange={(e) => setSlackChannelId(e.target.value)}
-                      placeholder="C0123456789"
-                      required
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="slack-token">
-                      Bot token{" "}
-                      <span className="text-muted-foreground">(optional, self-host)</span>
-                    </Label>
-                    <Input
-                      id="slack-token"
-                      type="password"
-                      value={slackToken}
-                      onChange={(e) => setSlackToken(e.target.value)}
-                      placeholder="xoxb-..."
-                      autoComplete="off"
-                    />
-                  </div>
-                </>
+                <div className="space-y-2">
+                  <Label htmlFor="slack-webhook-url">
+                    Slack incoming webhook URL
+                  </Label>
+                  <Input
+                    id="slack-webhook-url"
+                    type="url"
+                    value={slackWebhookUrl}
+                    onChange={(e) => setSlackWebhookUrl(e.target.value)}
+                    placeholder="https://hooks.slack.com/services/..."
+                    autoComplete="off"
+                    required
+                  />
+                  <p className="text-xs leading-relaxed text-muted-foreground">
+                    Slack receives a redacted, open-only notification. Final
+                    approval still happens in VekInbox.
+                  </p>
+                </div>
               )}
 
               <div className="flex gap-2">

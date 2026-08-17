@@ -101,7 +101,11 @@ slackRoutes.post("/interactions", async (c) => {
     return c.json({ ok: true });
   }
 
-  if (row.status !== "pending" && row.status !== "changes_requested") {
+  if (
+    row.status !== "pending" &&
+    row.status !== "changes_requested" &&
+    row.status !== "escalated"
+  ) {
     return c.json({
       response_type: "ephemeral",
       text: `Request is already ${row.status}`,

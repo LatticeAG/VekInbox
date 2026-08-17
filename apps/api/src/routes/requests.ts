@@ -11,7 +11,7 @@ import { requests } from "@latticeag/vekinbox-db";
 import { requireApiKey } from "../middleware/auth.js";
 import { getWorkspaceIdForRequest, requireReviewerOrApiKey } from "../middleware/dual-auth.js";
 import { requireSession } from "../middleware/session.js";
-import { assertWorkspaceMembership } from "../middleware/workspace-scope.js";
+import { assertReviewerMembership, assertWorkspaceMembership } from "../middleware/workspace-scope.js";
 import { getDb } from "../lib/db.js";
 import {
   cancelRequest,
@@ -82,7 +82,7 @@ requestRoutes.post("/:id/actions/:action", requireSession(), async (c) => {
     throw notFound("Request", requestId);
   }
 
-  await assertWorkspaceMembership(session.userId, row.workspaceId);
+  await assertReviewerMembership(session.userId, row.workspaceId);
 
   const request = await resolveRequest({
     workspaceId: row.workspaceId,
