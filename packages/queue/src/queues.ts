@@ -33,7 +33,7 @@ export function enqueueWebhookDelivery(
   data: WebhookDeliveryJobData,
 ): Promise<Job<WebhookDeliveryJobData>> {
   const queue = getQueue(connection, QUEUE_NAMES.WEBHOOKS);
-  const jobId = data.deliveryId ? `webhook:${data.deliveryId}` : `webhook:${data.requestId}:${Date.now()}`;
+  const jobId = data.deliveryId ? `webhook_${data.deliveryId}` : `webhook_${data.requestId}_${Date.now()}`;
 
   return queue.add(WEBHOOK_JOB, data, {
     jobId,
@@ -54,7 +54,7 @@ export function enqueueNotification(
 
   if (data.channelType === "email") {
     return queue.add(NOTIFICATION_EMAIL_JOB, data, {
-      jobId: `notify:email:${data.requestId}:${data.channelId}:${data.userId}`,
+      jobId: `notify_email_${data.requestId}_${data.channelId}_${data.userId}`,
       removeOnComplete: 1000,
       removeOnFail: 5000,
     } as JobsOptions) as Promise<Job<NotificationJobData>>;
@@ -62,14 +62,14 @@ export function enqueueNotification(
 
   if (data.channelType === "slack") {
     return queue.add(NOTIFICATION_SLACK_JOB, data, {
-      jobId: `notify:slack:${data.requestId}:${data.channelId}`,
+      jobId: `notify_slack_${data.requestId}_${data.channelId}`,
       removeOnComplete: 1000,
       removeOnFail: 5000,
     } as JobsOptions) as Promise<Job<NotificationJobData>>;
   }
 
   return queue.add(NOTIFICATION_SMS_JOB, data, {
-    jobId: `notify:sms:${data.requestId}:${data.channelId ?? data.userId ?? "recipient"}`,
+    jobId: `notify_sms_${data.requestId}_${data.channelId ?? data.userId ?? "recipient"}`,
     removeOnComplete: 1000,
     removeOnFail: 5000,
   } as JobsOptions) as Promise<Job<NotificationJobData>>;
@@ -83,7 +83,7 @@ export function scheduleEscalation(
   const queue = getQueue(connection, QUEUE_NAMES.ESCALATION);
 
   return queue.add(ESCALATION_JOB, data, {
-    jobId: `escalation:${data.requestId}:${data.stepIndex}`,
+    jobId: `escalation_${data.requestId}_${data.stepIndex}`,
     delay: options?.delay ?? 0,
     removeOnComplete: 1000,
     removeOnFail: 5000,
@@ -98,7 +98,7 @@ export function scheduleTimeout(
   const queue = getQueue(connection, QUEUE_NAMES.TIMEOUT);
 
   return queue.add(TIMEOUT_JOB, data, {
-    jobId: `timeout:${data.requestId}`,
+    jobId: `timeout_${data.requestId}`,
     delay: options?.delay ?? 0,
     removeOnComplete: 1000,
     removeOnFail: 5000,
