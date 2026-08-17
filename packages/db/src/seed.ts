@@ -33,6 +33,16 @@ async function main() {
   const db = createDb(connectionString);
 
   try {
+    // Idempotent seed: if the demo workspace already exists, the DB was
+    // seeded on a previous boot - skip re-seeding (plain inserts would
+    // violate unique constraints and kill the API container on restart).
+    const existing = await db.select({ id: workspaces.id }).from(workspaces).limit(1);
+    if (existing.length > 0) {
+      console.log("Database already seeded - skipping demo seed.");
+      await closeDb(db);
+      return;
+    }
+
     const orgId = generateId("org");
     const workspaceId = generateId("ws");
     const userId = generateId("user");
