@@ -5,8 +5,10 @@ services:
       POSTGRES_USER: vekinbox
       POSTGRES_PASSWORD: vekinbox
       POSTGRES_DB: vekinbox
-    ports:
-      - "5432:5432"
+    # No host port publish by default: api/worker reach postgres over the
+    # compose network. Host access is collision-prone (5432 is commonly
+    # taken). Override with docker-compose.override.yml for local psql:
+    #   services.postgres.ports: ["5433:5432"]
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -17,8 +19,7 @@ services:
 
   redis:
     image: redis:7-alpine
-    ports:
-      - "6379:6379"
+    # No host port publish by default - internal network only.
     volumes:
       - redis_data:/data
     healthcheck:
