@@ -27,12 +27,15 @@
 </p>
 
 <p align="center">
-  <a href="#quick-start-docker">Quick Start</a> ·
+  <a href="#quick-start-docker--5-min">Quick Start</a> ·
   <a href="#why-vekinbox">Why VekInbox</a> ·
-  <a href="#architecture">Architecture</a> ·
+  <a href="#how-it-works">How It Works</a> ·
   <a href="#sdk-examples">SDK Examples</a> ·
   <a href="#features">Features</a> ·
-  <a href="#monorepo-layout">Layout</a>
+  <a href="#commands">Commands</a> ·
+  <a href="#self-host-configuration">Configuration</a> ·
+  <a href="#testing">Testing</a> ·
+  <a href="#known-issues">Known Issues</a>
 </p>
 
 ---
@@ -75,13 +78,31 @@ docker compose logs api | grep "API Key"
 
 Save that key -- it is shown only once.
 
-| Service     | URL                              |
-|-------------|----------------------------------|
-| API         | http://localhost:3001/v1         |
-| Health      | http://localhost:3001/health     |
-| Mailcatcher | http://localhost:1080            |
-| Postgres    | localhost:5432                   |
-| Redis       | localhost:6379                   |
+| Service | URL | Published to host |
+|-------------|-----|-------------------|
+| API | http://localhost:3001/v1 | Yes (`3001:3001`) |
+| Health | http://localhost:3001/health | Yes (same API service) |
+| Mailcatcher | http://localhost:1080 | Yes (`1080:1080`, SMTP `1025:1025`) |
+| Postgres | Internal only (`postgres:5432`) | No -- override with `docker-compose.override.yml` for local psql |
+| Redis | Internal only (`redis:6379`) | No |
+
+## How It Works
+
+```mermaid
+flowchart TD
+  SDK["Agent SDK / CLI"] -->|create request| API["VekInbox API :3001"]
+  API --> PG[("Postgres\ndurable requests")]
+  API --> Redis[("Redis\nqueues")]
+  Redis --> Worker["apps/worker\ntimeouts, escalation, email"]
+  Browser["Reviewer browser\nweb inbox"] -->|approve / reject / cancel| API
+  API -->|signed webhook x-vekinbox-signature| AgentHook["Agent resume endpoint"]
+  SDK -->|waitForResolution polling| API
+```
+
+1. Agent creates a durable request via SDK or CLI (`key`-based idempotency dedupes retries).
+2. Request persists in Postgres; timeout/escalation jobs enqueue in Redis.
+3. Human approves, rejects, or cancels in the web inbox, CLI, or email.
+4. API fires an HMAC-signed webhook (`x-vekinbox-signature`) to the agent's `resumeWebhook`, retrying with backoff until acknowledged -- or the SDK's `waitForResolution` poll loop picks up the verdict.
 
 ## SDK Examples
 
@@ -95,7 +116,7 @@ npm install @latticeag/vekinbox
 import { VekInbox } from "@latticeag/vekinbox";
 
 const inbox = new VekInbox({
-  apiKey: process.env.VEKINBOX_API_KEY!,
+  apiKey: "vk_live_...",
   baseUrl: "http://localhost:3001/v1",
 });
 
@@ -113,11 +134,12 @@ if (result.status === "approved") {
 }
 ```
 
+`waitForResolution` polls every 2s by default (configurable `pollInterval`) and resolves once the request leaves `pending`/`escalated`, or throws on timeout (default 1h).
+
 ### Python
 
 ```bash
-cd packages/sdk-python
-pip install -e .
+pip install vekinbox  # or: cd packages/sdk-python && pip install -e .
 ```
 
 ```python
@@ -135,22 +157,6 @@ result = inbox.requests.wait_for_resolution(req.id, timeout="1h")
 
 See [packages/sdk-python/README.md](packages/sdk-python/README.md).
 
-## Architecture
-
-```text
-+-------------+     HTTPS      +--------------+     SQL     +----------+
-| Agent SDK   |--------------->|  VekInbox    |------------>| Postgres |
-| / CLI       |                |  API :3001   |             +----------+
-+-------------+                |              |     queue   +----------+
-                               |              |------------>|  Redis   |
-+-------------+     HTTPS      |              |             +----+-----+
-|  Reviewer   |--------------->|  Web inbox   |                  |
-|  Browser    |                +--------------+                  v
-+-------------+                                           +--------------+
-                                                          | apps/worker  |
-                                                          +--------------+
-```
-
 ## Features
 
 ### Core
@@ -159,7 +165,7 @@ See [packages/sdk-python/README.md](packages/sdk-python/README.md).
 |---------|------------|
 | **Approval queue** | Agents create durable requests; humans approve, reject, or cancel. |
 | **Wait-for-resolution** | SDK blocks (with timeout) until a decision is made. Polling or webhooks. |
-| **Signed webhooks** | `resumeWebhook` fires with HMAC-SHA256 signature on resolution. |
+| **Signed webhooks** | `resumeWebhook` fires with HMAC-SHA256 signature (`x-vekinbox-signature` header) on resolution. |
 | **Idempotent creation** | `key`-based idempotency prevents duplicate requests for the same action. |
 | **Timeout & escalation** | Policy-driven delay before escalation to fallback channel. |
 | **Multi-tenant workspaces** | Isolated agents, policies, and channel configurations per workspace. |
@@ -168,9 +174,9 @@ See [packages/sdk-python/README.md](packages/sdk-python/README.md).
 
 | Feature | Description |
 |---------|------------|
-| **TypeScript SDK** | `@latticeag/vekinbox` -- `create`, `waitForResolution`, `list`, `cancel` |
-| **Python SDK** | `vekinbox` -- same API surface, same types |
-| **CLI** | `vekinbox` -- auth, workspaces, agents, policies, channels, request management, local webhook forwarding |
+| **TypeScript SDK** | `@latticeag/vekinbox` (v0.1.0) -- `create`, `get`, `list`, `cancel`, `waitForResolution` |
+| **Python SDK** | `vekinbox` (v0.1.0) -- `create`, `get`, `list`, `cancel`, `wait_for_resolution` |
+| **CLI** | `vekinbox` (`@latticeag/vekinbox-cli`) -- `auth`, `workspace`, `agent`, `policy`, `channel`, `request`, `dev` |
 | **Framework examples** | LangGraph (Python), OpenAI Agents (TS), CrewAI (Python) |
 
 ### Reviewer Experience
@@ -257,6 +263,8 @@ pnpm test          # run once
 pnpm test:watch    # watch mode
 ```
 
+Unit suite runs without Docker: **74 passed** across 20 files (`npx vitest run`). The 16 skipped tests in 4 files (`requests`, `timeout`, `v3-approvals`, `legacy-safety` integration suites) require a live Postgres + Redis.
+
 Tests cover idempotent request creation, agent vs session auth, tenant isolation, cancel, timeout processing, and webhook signature verification.
 
 ## Development
@@ -281,6 +289,7 @@ pnpm test
 - **API key shown once** - The initial API key is printed to container logs on first start only. If lost, reset with `docker compose run api pnpm db:seed --reset`.
 - **Worker requires Redis** - Timeout processing and email notifications depend on a running Redis instance. Without it, requests never expire or escalate.
 - **SMTP required for email notifications** - No built-in sendmail. Configure an SMTP relay or use Mailpit/Mailcatcher for local development.
+- **Postgres/Redis not on host ports** - Only the API (`3001`) and Mailcatcher (`1080`/`1025`) publish host ports. Point local tools at the compose network or add a `docker-compose.override.yml` mapping (e.g. `5433:5432`).
 
 ## License
 
