@@ -14,7 +14,7 @@
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "clean": "rm -rf dist",
-    "dev": "node --watch dist/index.js"
+    "dev": "pnpm build && node --watch dist/index.js"
   },
   "dependencies": {
     "@latticeag/vekinbox": "workspace:*",

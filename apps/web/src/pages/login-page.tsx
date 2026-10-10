@@ -16,7 +16,7 @@ import { ApiClientError } from "@/lib/api";
 
 export function LoginPage() {
   const { user, loading, login } = useAuth();
-  const [email, setEmail] = useState("reviewer@localhost");
+  const [email, setEmail] = useState("admin@vekinbox.local");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 

@@ -69,7 +69,7 @@ async function main() {
 
       await tx.insert(users).values({
         id: userId,
-        email: "admin@localhost",
+        email: "admin@vekinbox.local",
         name: "Admin User",
       });
 
@@ -102,7 +102,7 @@ async function main() {
     console.log("Seed data created:");
     console.log(`  Organization: ${orgId}`);
     console.log(`  Workspace:    ${workspaceId}`);
-    console.log(`  User:         ${userId} (admin@localhost)`);
+    console.log(`  User:         ${userId} (admin@vekinbox.local)`);
     console.log(`  Agent:        ${agentId}`);
     console.log(`  API Key:      ${fullApiKey}`);
     console.log("");

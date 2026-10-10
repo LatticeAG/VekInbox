@@ -192,7 +192,7 @@ See [packages/sdk-python/README.md](packages/sdk-python/README.md).
 
 ```bash
 # Auth
-vekinbox auth login --email admin@localhost --api-key vk_live_... --workspace ws_...
+vekinbox auth login --email admin@vekinbox.local --api-key vk_live_... --workspace ws_...
 vekinbox auth status
 
 # Workspaces & agents
@@ -256,7 +256,7 @@ vekinbox/
 ## Testing
 
 ```bash
-docker compose up postgres redis -d
+docker compose up postgres redis -d   # needs host ports — see the override below
 export DATABASE_URL=postgresql://vekinbox:***@localhost:5432/vekinbox
 pnpm db:migrate
 pnpm test          # run once
@@ -271,11 +271,25 @@ Tests cover idempotent request creation, agent vs session auth, tenant isolation
 
 **Requirements:** Node 22+, pnpm 10+, Docker (Postgres/Redis), Python 3.10+.
 
+Postgres and Redis are **not published to host ports** — compose keeps them on the internal network for the `api`/`worker` services. To run `db:migrate`, `db:seed`, the host API, or local tooling (`psql`, TablePlus) against them, publish ports with a `docker-compose.override.yml` (compose merges it automatically; the file is gitignored as local-only):
+
+```yaml
+# docker-compose.override.yml
+services:
+  postgres:
+    ports: ["5433:5432"]
+  redis:
+    ports: ["6380:6379"]
+```
+
+Then point `.env` / your shell at the published host ports:
+
 ```bash
 pnpm install
-docker compose up postgres redis mailcatcher -d
 cp .env.example .env
-export DATABASE_URL=postgresql://vekinbox:***@localhost:5432/vekinbox
+docker compose up postgres redis mailcatcher -d
+export DATABASE_URL=postgresql://vekinbox:vekinbox@localhost:5433/vekinbox
+export REDIS_URL=redis://localhost:6380
 pnpm db:migrate
 pnpm db:seed
 pnpm dev              # API + web + packages
@@ -284,12 +298,14 @@ pnpm build
 pnpm test
 ```
 
+`db:migrate`, `db:seed`, and `pnpm dev` run against workspace `src/` (via the `development` export condition), so they work on a clean checkout before `pnpm build`. `pnpm dev` still builds package dependencies first through turbo. The seeded dev user is `admin@vekinbox.local` — sign in through `/v1/auth/dev-login` or the web inbox login page.
+
 ## Known Issues
 
 - **API key shown once** - The initial API key is printed to container logs on first start only. If lost, reset with `docker compose run api pnpm db:seed --reset`.
 - **Worker requires Redis** - Timeout processing and email notifications depend on a running Redis instance. Without it, requests never expire or escalate.
 - **SMTP required for email notifications** - No built-in sendmail. Configure an SMTP relay or use Mailpit/Mailcatcher for local development.
-- **Postgres/Redis not on host ports** - Only the API (`3001`) and Mailcatcher (`1080`/`1025`) publish host ports. Point local tools at the compose network or add a `docker-compose.override.yml` mapping (e.g. `5433:5432`).
+- **Postgres/Redis not on host ports** - Only the API (`3001`) and Mailcatcher (`1080`/`1025`) publish host ports. Point local tools at the compose network or add a `docker-compose.override.yml` mapping — see [Development](#development).
 
 ## License
 
