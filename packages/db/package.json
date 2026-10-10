@@ -8,6 +8,7 @@
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
+      "development": "./src/index.ts",
       "import": "./dist/index.js"
     }
   },
@@ -16,8 +17,8 @@
     "typecheck": "tsc --noEmit",
     "dev": "tsc --watch",
     "generate": "drizzle-kit generate",
-    "migrate": "tsx src/migrate.ts",
-    "seed": "tsx src/seed.ts"
+    "migrate": "tsx --conditions=development src/migrate.ts",
+    "seed": "tsx --conditions=development src/seed.ts"
   },
   "dependencies": {
     "@latticeag/vekinbox-shared": "workspace:*",

@@ -7,7 +7,36 @@
     },
     "dev": {
       "cache": false,
-      "persistent": true
+      "persistent": true,
+      "dependsOn": ["^build"],
+      "passThroughEnv": [
+        "DATABASE_URL",
+        "REDIS_URL",
+        "SESSION_SECRET",
+        "PORT",
+        "API_PORT",
+        "API_HOST",
+        "NODE_ENV",
+        "WEB_URL",
+        "WEB_DIST",
+        "VITE_API_URL",
+        "EMPTY_DB",
+        "OIDC_ISSUER",
+        "OIDC_CLIENT_ID",
+        "OIDC_CLIENT_SECRET",
+        "GITHUB_CLIENT_ID",
+        "GITHUB_CLIENT_SECRET",
+        "GOOGLE_CLIENT_ID",
+        "GOOGLE_CLIENT_SECRET",
+        "SMTP_HOST",
+        "SMTP_PORT",
+        "SMTP_USER",
+        "SMTP_PASS",
+        "SMTP_FROM",
+        "SLACK_BOT_TOKEN",
+        "SLACK_SIGNING_SECRET",
+        "SENTRY_DSN"
+      ]
     }
   }
 }

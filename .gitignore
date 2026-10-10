@@ -9,6 +9,7 @@ dist/
 coverage/
 .idea/
 .vscode/
+docker-compose.override.yml
 
 # LatticeAG internal docs - never public
 *SPEC*.md
