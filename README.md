@@ -60,15 +60,32 @@ Built for production agent deployments that need a reliable human-in-the-loop la
 
 ## Quick Start (Docker Compose, ~5 min)
 
+Install Docker Engine or Docker Desktop with the Compose plugin, and ensure the
+Docker daemon is running and your user can access its socket (`docker info`).
+The first build also needs internet access and free host ports 3001, 1080, and
+1025. Compose networking must allow containers to reach each other. Docker's
+rootless mode uses a per-user socket; select the rootless Docker context or set
+`DOCKER_HOST` to the socket shown by your rootless setup. If access to a
+rootful socket is denied, use an appropriately authorized Docker user or run
+Compose with `sudo` where your system permits it. Docker socket access grants
+substantial control over the host.
+
 ```bash
 git clone https://github.com/LatticeAG/VekInbox.git
 cd VekInbox
 cp .env.example .env
 
-docker compose up --build
+docker compose up --build -d
+docker compose ps
+curl -fsS http://localhost:3001/health
 ```
 
-Open **http://localhost:3001/health** -- API is ready when `{"status":"ok"}`.
+The API is ready when `docker compose ps` shows it as `healthy` and the health
+request returns `{"status":"ok"}`. Postgres and Redis should also be healthy;
+the worker should be running. If startup fails, inspect `docker compose logs
+api postgres redis worker`. A healthy Postgres container alone does not prove
+that another container can reach it: check Docker bridge networking and firewall
+rules if the API cannot connect to `postgres:5432`.
 
 On first start (`EMPTY_DB=true`), the entrypoint seeds demo data and prints an API key to the logs:
 
