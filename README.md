@@ -81,7 +81,7 @@ curl -fsS http://localhost:3001/health
 ```
 
 The API is ready when `docker compose ps` shows it as `healthy` and the health
-request returns `{"status":"ok"}`. Postgres and Redis should also be healthy;
+response includes `"status":"ok"`. Postgres and Redis should also be healthy;
 the worker should be running. If startup fails, inspect `docker compose logs
 api postgres redis worker`. A healthy Postgres container alone does not prove
 that another container can reach it: check Docker bridge networking and firewall
@@ -272,15 +272,32 @@ vekinbox/
 
 ## Testing
 
-```bash
-docker compose up postgres redis -d
-export DATABASE_URL=postgresql://vekinbox:***@localhost:5432/vekinbox
-pnpm db:migrate
-pnpm test          # run once
-pnpm test:watch    # watch mode
+The default suite runs without services. Integration suites are skipped unless
+`DATABASE_URL` is set. To run all tests, start Postgres and Redis reachable from
+the host. For example, create `docker-compose.override.yml` containing:
+
+```yaml
+services:
+  postgres:
+    ports: ["5433:5432"]
+  redis:
+    ports: ["6380:6379"]
 ```
 
-Unit suite runs without Docker: **74 passed** across 20 files (`npx vitest run`). The 16 skipped tests in 4 files (`requests`, `timeout`, `v3-approvals`, `legacy-safety` integration suites) require a live Postgres + Redis.
+Then run:
+
+```bash
+docker compose up -d postgres redis
+export DATABASE_URL=postgresql://vekinbox:vekinbox@127.0.0.1:5433/vekinbox
+export REDIS_URL=redis://127.0.0.1:6380
+export SESSION_SECRET=local-dev
+pnpm db:migrate
+pnpm db:seed
+pnpm test
+```
+
+The four integration suites (`requests`, `timeout`, `v3-approvals`, and
+`legacy-safety`) contain 16 tests. `pnpm test:watch` runs in watch mode.
 
 Tests cover idempotent request creation, agent vs session auth, tenant isolation, cancel, timeout processing, and webhook signature verification.
 
