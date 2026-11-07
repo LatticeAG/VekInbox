@@ -1,6 +1,12 @@
 import { defineConfig } from "vitest/config";
 import { fileURLToPath } from "node:url";
 
+if (!process.env["DATABASE_URL"]) {
+  console.warn(
+    "Integration tests will be skipped: DATABASE_URL is unset. Start Postgres and Redis, set DATABASE_URL and REDIS_URL, run pnpm db:migrate && pnpm db:seed, then pnpm test. See README Testing.",
+  );
+}
+
 const fromRoot = (path: string) =>
   fileURLToPath(new URL(path, import.meta.url));
 
